@@ -53,7 +53,7 @@ class Species
      *
      * @var IucnStatus
      */
-    #[ORM\Column(type: 'string', length: 2, enumType: IucnStatus::class)]
+    #[ORM\Column(type: 'string', length: 2, nullable: true, enumType: IucnStatus::class)]
     private ?IucnStatus $iucn;
 
     /**
@@ -90,6 +90,9 @@ class Species
     #[ORM\JoinTable(name: 'fauna_species_to_country')]
     private Collection $countries;
 
+    #[ORM\Column(type: 'integer', unique: true, nullable: true)]
+    private ?int $externalId = null;
+
     /**
      * Date when the species was added to the database
      *
@@ -106,6 +109,14 @@ class Species
     #[ORM\Column(type: 'datetime_immutable')]
     private DateTimeImmutable $dateUpdated;
 
+    /**
+     * Constructor for the Species entity
+     *
+     * @param string $name
+     * @param string $latin
+     * @param IucnStatus|null $iucn
+     * @param Taxonomy|null $genus
+     */
     public function __construct(string $name = '', string $latin = '', ?IucnStatus $iucn = null, ?Taxonomy $genus = null)
     {
         $this->name = $name;
@@ -322,6 +333,39 @@ class Species
     public function removeCountry(Country $country): self
     {
         $this->countries->removeElement($country);
+        return $this;
+    }
+
+    public function getExternalId(): ?int
+    {
+        return $this->externalId;
+    }
+
+    public function setExternalId(?int $externalId): self
+    {
+        $this->externalId = $externalId;
+        return $this;
+    }
+
+    public function getDateAdded(): DateTimeImmutable
+    {
+        return $this->dateAdded;
+    }
+
+    public function setDateAdded(DateTimeImmutable $dateAdded): self
+    {
+        $this->dateAdded = $dateAdded;
+        return $this;
+    }
+
+    public function getDateUpdated(): DateTimeImmutable
+    {
+        return $this->dateUpdated;
+    }
+
+    public function setDateUpdated(DateTimeImmutable $dateUpdated): self
+    {
+        $this->dateUpdated = $dateUpdated;
         return $this;
     }
 }
