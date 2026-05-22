@@ -1,43 +1,41 @@
 {
     "name": "jedi58/inachis-fauna",
-    "type": "library",
+    "type": "symfony-bundle",
     "description": "An extension to the Inachis framework for recording wildlife sightings",
-    "keywords": ["dev"],
+    "keywords": ["inachis", "plugin", "wildlife", "fauna"],
     "license": "MIT",
     "authors": [
         {
             "name": "David G. Paul"
         }
     ],
-    "repositories": [
-        {
-            "type": "git",
-            "url": "https://github.com/jedi58/inachis.git"
-        }
-    ],
     "require": {
-        "php": ">=5.6.1",
-        
-        "doctrine/dbal": "2.5.*",
-        "doctrine/orm": "2.5.*",
-        "monolog/monolog": "1.*",
-        "twig/twig": "1.*",
-        
-        "jedi58/inachis": "@dev"
+        "php": ">=8.4",
+        "doctrine/orm": "^3.0",
+        "twig/twig": "^3.0",
+        "ramsey/uuid": "^4.7",
+        "ramsey/uuid-doctrine": "^2.0",
+        "symfony/config": "^8.0",
+        "symfony/dependency-injection": "^8.0",
+        "symfony/doctrine-bridge": "^8.0",
+        "symfony/form": "^8.0",
+        "symfony/framework-bundle": "^8.0",
+        "symfony/http-kernel": "^8.0",
+        "symfony/routing": "^8.0",
+        "symfony/security-bundle": "^8.0",
+        "symfony/validator": "^8.0"
     },
     "require-dev": {
-        "behat/behat": "2.*",
-        "mockery/mockery": "dev-master",
-        "php-console/php-console": "3.*",
-        "phpdocumentor/phpdocumentor": "2.*",
-        "phpunit/phpunit": "4.*",
-        "phpunit/phpunit-skeleton-generator": "*",
-        "squizlabs/php_codesniffer": "2.*"
+        "phpunit/phpunit": "^11.0"
     },
     "autoload": {
         "psr-4": {
-            "Inachis\\Component\\": "src/Inachis/"
+            "Inachis\\Fauna\\": "src/"
         }
     },
-    "minimum-stability": "dev"
+    "autoload-dev": {
+        "psr-4": {
+            "Inachis\\Fauna\\Tests\\": "tests/"
+        }
+    }
 }

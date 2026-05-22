@@ -1,0 +1,9 @@
+doctrine:
+    orm:
+        mappings:
+            FaunaBundle:
+                is_bundle: false
+                type: attribute
+                dir: '%kernel.project_dir%/vendor/jedi58/inachis-fauna/src/Entity'
+                prefix: 'Inachis\Fauna\Entity'
+                alias: FaunaBundle

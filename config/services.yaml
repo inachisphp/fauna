@@ -1,0 +1,24 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    Inachis\Fauna\:
+        resource: '../src/'
+        exclude:
+            - '../src/DependencyInjection/'
+            - '../src/Entity/'
+            - '../src/FaunaBundle.php'
+
+    Inachis\Fauna\Controller\:
+        resource: '../src/Controller/'
+        tags: ['controller.service_arguments']
+
+    Inachis\Fauna\Repository\:
+        resource: '../src/Repository/'
+        tags: ['doctrine.repository_service']
+
+    Inachis\Fauna\Command\:
+        resource: '../src/Command/'
+        tags: ['console.command']
