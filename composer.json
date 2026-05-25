@@ -1,5 +1,5 @@
 {
-    "name": "jedi58/inachis-fauna",
+    "name": "inachisphp/fauna",
     "type": "symfony-bundle",
     "description": "An extension to the Inachis framework for recording wildlife sightings",
     "keywords": ["inachis", "plugin", "wildlife", "fauna"],
