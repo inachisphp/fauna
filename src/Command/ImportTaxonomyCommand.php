@@ -34,16 +34,42 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ImportTaxonomyCommand extends Command
 {
+    /**
+     * @var const The number of records to process before flushing to the database.
+     */
     private const BATCH_SIZE = 20;
 
+    /**
+     * @var array In-memory cache to map taxonomy uniqueness keys to their database IDs, to minimize redundant queries during import.
+     */
     private array $taxonomyIdCache = [];
+
+    /**
+     * @var array In-memory cache to store pending taxonomy records before flushing to the database.
+     */
     private array $pendingTaxonomyCache = [];
+
+    /**
+     * @var array In-memory cache to store country IDs by their codes.
+     */
     private array $countryIdCache = [];
 
+    /**
+     * @var array A rolling log of recently encountered malformed rows during TSV parsing, to aid in debugging without overwhelming memory. Each entry includes line number, expected vs actual column counts, and a preview of the row data.
+     */
     private array $recentMalformedRows = [];
 
+    /**
+     * @var integer The number of records processed since the last flush to the database.
+     */
     private int $flushCount = 0;
 
+    /**
+     * Constructor for the ImportTaxonomyCommand.
+     *
+     * @param EntityManagerInterface $entityManager
+     * @param Connection $connection
+     */
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly Connection $connection
@@ -51,6 +77,11 @@ class ImportTaxonomyCommand extends Command
         parent::__construct();
     }
 
+    /**
+     * Configures the command.
+     *
+     * @return void
+     */
     protected function configure(): void
     {
         $this
@@ -89,6 +120,13 @@ class ImportTaxonomyCommand extends Command
             );
     }
 
+    /**
+     * Executes the command.
+     *
+     * @param InputInterface $input
+     * @param OutputInterface $output
+     * @return int
+     */
     protected function execute(
         InputInterface $input,
         OutputInterface $output
@@ -97,11 +135,7 @@ class ImportTaxonomyCommand extends Command
 
         gc_enable();
 
-        /*
-         * CRITICAL:
-         * Prevent Doctrine DBAL middleware
-         * memory accumulation.
-         */
+        // CRITICAL: Prevent Doctrine DBAL middleware memory accumulation.
         $this->connection
             ->getConfiguration()
             ->setMiddlewares([]);
@@ -120,9 +154,7 @@ class ImportTaxonomyCommand extends Command
         $importVernacular = (bool) $input->getOption('import-vernacular');
         $importDistribution = (bool) $input->getOption('import-distribution');
 
-         /*
-         * If no specific import options are provided, import all.
-         */
+        // If no specific import options are provided, import all.
         if (
             !$importTaxa
             && !$importVernacular
@@ -214,6 +246,15 @@ class ImportTaxonomyCommand extends Command
         return Command::SUCCESS;
     }
 
+    /**
+     * Imports taxonomy data from a TSV file.
+     *
+     * @param string $file
+     * @param array $stats
+     * @param boolean $dryRun
+     * @param OutputInterface $output
+     * @return void
+     */
     private function importTaxa(
         string $file,
         array &$stats,
@@ -348,6 +389,15 @@ class ImportTaxonomyCommand extends Command
         $output->writeln('');
     }
 
+    /**
+     * Imports vernacular names from a TSV file.
+     *
+     * @param string $file
+     * @param array $stats
+     * @param bool $dryRun
+     * @param OutputInterface $output
+     * @return void
+     */
     private function importVernacular(
         string $file,
         array &$stats,
@@ -359,82 +409,121 @@ class ImportTaxonomyCommand extends Command
         }
 
         $handle = fopen($file, 'rb');
-
         if ($handle === false) {
             return;
         }
 
         $headers = fgetcsv($handle, 0, "\t", '"', '\\');
-
         if ($headers === false) {
             fclose($handle);
             return;
         }
 
         $headers = array_map('trim', $headers);
-
         $progress = new ProgressBar($output);
-
         $progress->start();
 
         $batch = 0;
+        
+        // This memory cache keeps track of names assigned during *this script execution* // to bypass continuous database SELECT overhead.
+        $assignedNamesCache = [];
+
+        // Helper closure to evaluate which of two names is superior
+        $isBetterName = function(string $newCandidate, ?string $existingName): bool {
+            if ($existingName === null || trim($existingName) === '') {
+                return true;
+            }
+
+            // 1. Prioritize Title Case / Uppercase starting letters over lowercase
+            $isCapNew = ctype_upper(substr($newCandidate, 0, 1));
+            $isCapOld = ctype_upper(substr($existingName, 0, 1));
+            
+            if ($isCapNew !== $isCapOld) {
+                return $isCapNew && !$isCapOld; // true if new is capitalized and old is not
+            }
+
+            // 2. Sort by string length descending (prefer descriptive over generic)
+            $lenNew = strlen($newCandidate);
+            $lenOld = strlen($existingName);
+            if ($lenNew !== $lenOld) {
+                return $lenNew > $lenOld;
+            }
+
+            // 3. Fallback to case-insensitive alphabetical sorting for absolute consistency
+            return strcasecmp($newCandidate, $existingName) < 0;
+        };
 
         while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
             ++$stats['processed'];
-
             $progress->advance();
 
             if (count($row) !== count($headers)) {
                 ++$stats['malformed_rows'];
-                // $this->recordMalformedRow($row);
                 continue;
             }
 
             $data = array_combine($headers, $row);
-
             if ($data === false) {
                 ++$stats['malformed_rows'];
                 continue;
             }
 
-            $taxonId = isset($data['taxonID'])
-                ? (int) $data['taxonID']
-                : null;
+            // Strict filter for English language only
+            $language = trim((string) ($data['language'] ?? ''));
+            if ($language !== 'en') {
+                continue;
+            }
 
-            $vernacular = trim(
-                (string) ($data['vernacularName'] ?? '')
-            );
+            $taxonId = isset($data['taxonID']) ? (int) $data['taxonID'] : null;
+            $vernacular = trim((string) ($data['vernacularName'] ?? ''));
 
             if ($taxonId === null || $vernacular === '') {
-                ++$stats['skipped'];
                 continue;
             }
 
             $speciesId = $this->getSpeciesIdByExternalId($taxonId);
-
             if ($speciesId === null) {
                 ++$stats['skipped'];
                 continue;
             }
 
-            $species = $this->entityManager->getReference(
-                Species::class,
-                Uuid::fromString($speciesId)
-            );
-
-            if (method_exists($species, 'setName')) {
-                $species->setName($vernacular);
+            // Find what name this species currently has (check local cache first, then database)
+            $currentName = null;
+            if (isset($assignedNamesCache[$speciesId])) {
+                $currentName = $assignedNamesCache[$speciesId];
+            } else {
+                $currentName = $this->connection->fetchOne(
+                    'SELECT name FROM fauna_species WHERE id = :id LIMIT 1',
+                    ['id' => $speciesId]
+                );
+                if ($currentName === false) {
+                    $currentName = null;
+                }
             }
 
-            ++$stats['vernacular_updated'];
-            ++$batch;
+            // Compare the names using our priority rules
+            if ($isBetterName($vernacular, $currentName)) {
+                $species = $this->entityManager->getReference(
+                    Species::class,
+                    \Ramsey\Uuid\Uuid::fromString($speciesId)
+                );
 
-            if ($batch >= self::BATCH_SIZE) {
-                if (!$dryRun) {
-                    $this->flushAndClear();
+                if (method_exists($species, 'setName')) {
+                    $species->setName($vernacular);
+                    $assignedNamesCache[$speciesId] = $vernacular;
+                    
+                    ++$stats['vernacular_updated'];
+                    ++$batch;
+
+                    if ($batch >= self::BATCH_SIZE) {
+                        if (!$dryRun) {
+                            $this->flushAndClear();
+                        }
+                        $batch = 0;
+                    }
                 }
-
-                $batch = 0;
+            } else {
+                ++$stats['skipped'];
             }
         }
 
@@ -443,12 +532,19 @@ class ImportTaxonomyCommand extends Command
         }
 
         fclose($handle);
-
         $progress->finish();
-
         $output->writeln('');
     }
 
+    /**
+     * Imports distribution data from a TSV file.
+     *
+     * @param string $file
+     * @param array $stats
+     * @param bool $dryRun
+     * @param OutputInterface $output
+     * @return void
+     */
     private function importDistribution(
         string $file,
         array &$stats,
@@ -460,94 +556,193 @@ class ImportTaxonomyCommand extends Command
         }
 
         $handle = fopen($file, 'rb');
-
         if ($handle === false) {
             return;
         }
 
         $headers = fgetcsv($handle, 0, "\t", '"', '\\');
-
         if ($headers === false) {
             fclose($handle);
             return;
         }
 
         $headers = array_map('trim', $headers);
-
         $progress = new ProgressBar($output);
-
         $progress->start();
 
-        $batch = 0;
+        // High efficiency line-based batching boundary
+        $processedBatchCount = 0;
+        $lineBatchSize = 1000; 
+
+        // In-memory runtime caches to handle fragmentation across non-sequential rows
+        $assignedDistributionsCache = [];
+        $assignedThreatStatusCache = [];
+
+        // Define IUCN Severity Levels (higher numbers = more critical threat)
+        $iucnSeverity = [
+            'EX' => 7, // Extinct
+            'EW' => 6, // Extinct in the Wild
+            'CR' => 5, // Critically Endangered
+            'EN' => 4, // Endangered
+            'VU' => 3, // Vulnerable
+            'NT' => 2, // Near Threatened
+            'LC' => 1, // Least Concern
+        ];
+
+        // Normalizer to convert full text to clean 2-letter codes expected by IucnStatus enum
+        $normalizeThreatStatus = function(string $status) {
+            $status = strtoupper(trim($status));
+            $mapping = [
+                'EXTINCT' => 'EX',
+                'EXTINCT IN THE WILD' => 'EW',
+                'CRITICALLY ENDANGERED' => 'CR',
+                'CRITICAL' => 'CR',
+                'ENDANGERED' => 'EN',
+                'VULNERABLE' => 'VU',
+                'NEAR THREATENED' => 'NT',
+                'LEAST CONCERN' => 'LC'
+            ];
+            return $mapping[$status] ?? $status;
+        };
+
+        // Helper closure to see if a candidate IUCN status is more severe than what is currently set
+        $isMoreEndangered = function(?string $newStatus, ?string $currentStatus) use ($iucnSeverity, $normalizeThreatStatus): bool {
+            if ($newStatus === null || trim($newStatus) === '') {
+                return false;
+            }
+            
+            $newCode = $normalizeThreatStatus($newStatus);
+            if (!isset($iucnSeverity[$newCode])) {
+                return false; // Not a recognized threat tier (e.g. DD, NE)
+            }
+
+            if ($currentStatus === null || trim($currentStatus) === '') {
+                return true;
+            }
+            
+            $currentCode = $normalizeThreatStatus($currentStatus);
+            
+            $newRank = $iucnSeverity[$newCode] ?? 0;
+            $currentRank = $iucnSeverity[$currentCode] ?? 0;
+
+            return $newRank > $currentRank;
+        };
 
         while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
             ++$stats['processed'];
-
+            ++$processedBatchCount;
             $progress->advance();
 
             if (count($row) !== count($headers)) {
                 ++$stats['malformed_rows'];
-                // $this->recordMalformedRow($row);
                 continue;
             }
 
             $data = array_combine($headers, $row);
-
             if ($data === false) {
                 ++$stats['malformed_rows'];
                 continue;
             }
 
-            $taxonId = isset($data['taxonID'])
-                ? (int) $data['taxonID']
-                : null;
+            $taxonId = isset($data['taxonID']) ? (int) $data['taxonID'] : null;
+            $countryCode = trim((string) ($data['countryCode'] ?? ''));
+            $threatStatus = trim((string) ($data['threatStatus'] ?? ''));
 
-            $countryCode = trim(
-                (string) ($data['countryCode'] ?? '')
-            );
-
-            if ($taxonId === null || $countryCode === '') {
+            if ($taxonId === null) {
                 ++$stats['skipped'];
                 continue;
             }
 
             $speciesId = $this->getSpeciesIdByExternalId($taxonId);
-
             if ($speciesId === null) {
                 ++$stats['skipped'];
                 continue;
             }
 
-            $countryId = $this->getCountryIdByCode($countryCode);
+            // --- 1. HANDLE IUCN THREAT STATUS OVERLAPS ---
+            if ($threatStatus !== '') {
+                $currentThreat = null;
 
-            if ($countryId === null) {
-                ++$stats['skipped'];
-                continue;
-            }
-
-            if (!$dryRun) {
-                try {
-                    $this->connection->insert(
-                        'fauna_species_to_country',
-                        [
-                            'species_id' => $speciesId,
-                            'country_id' => $countryId,
-                        ]
+                if (isset($assignedThreatStatusCache[$speciesId])) {
+                    $currentThreat = $assignedThreatStatusCache[$speciesId];
+                } else {
+                    // Fetch existing status from database field via DBAL connection
+                    $dbThreat = $this->connection->fetchOne(
+                        'SELECT iucn FROM fauna_species WHERE id = :id LIMIT 1',
+                        ['id' => $speciesId]
                     );
-                } catch (UniqueConstraintViolationException) {
-                    ++$stats['duplicates_skipped'];
+                    $currentThreat = $dbThreat !== false ? $dbThreat : null;
+                }
+
+                if ($isMoreEndangered($threatStatus, $currentThreat)) {
+                    $species = $this->entityManager->getReference(
+                        Species::class,
+                        \Ramsey\Uuid\Uuid::fromString($speciesId)
+                    );
+
+                    // Normalize to the shortcode (e.g., "Vulnerable" -> "VU") before Enum factory check
+                    $cleanCode = $normalizeThreatStatus($threatStatus);
+                    $enumValue = IucnStatus::tryFromValue($cleanCode);
+                    
+                    if ($enumValue !== null && method_exists($species, 'setIucn')) {
+                        $species->setIucn($enumValue);
+                        $assignedThreatStatusCache[$speciesId] = $cleanCode;
+                    }
                 }
             }
 
-            ++$stats['distribution_updated'];
-            ++$batch;
+            // --- 2. HANDLE GEOGRAPHIC COUNTRY MAPPING ---
+            if ($countryCode !== '') {
+                $countryId = $this->getCountryIdByCode($countryCode);
 
-            if ($batch >= self::BATCH_SIZE) {
+                if ($countryId !== null) {
+                    $uniqueComboKey = $speciesId . '|' . $countryId;
+
+                    // Verify if this combination has already been matched during this run
+                    if (!isset($assignedDistributionsCache[$uniqueComboKey])) {
+                        
+                        // Fallback check against the database bridge table
+                        $existsInDb = (bool) $this->connection->fetchOne(
+                            'SELECT 1 FROM fauna_species_to_country WHERE species_id = :s_id AND country_id = :c_id LIMIT 1',
+                            ['s_id' => $speciesId, 'c_id' => $countryId]
+                        );
+
+                        if (!$existsInDb) {
+                            if (!$dryRun) {
+                                try {
+                                    $this->connection->insert(
+                                        'fauna_species_to_country',
+                                        [
+                                            'species_id' => $speciesId,
+                                            'country_id' => $countryId,
+                                        ]
+                                    );
+                                } catch (UniqueConstraintViolationException) {
+                                    // Safeguard catch
+                                }
+                            }
+                            
+                            $assignedDistributionsCache[$uniqueComboKey] = true;
+                            ++$stats['distribution_updated'];
+                        } else {
+                            $assignedDistributionsCache[$uniqueComboKey] = true;
+                            ++$stats['duplicates_skipped'];
+                        }
+                    } else {
+                        ++$stats['duplicates_skipped'];
+                    }
+                } else {
+                    ++$stats['skipped'];
+                }
+            }
+
+            // --- 3. BOUNDED PROCESSING FLUSH ---
+            // Flush exactly every 1,000 processed input lines to save managed entities safely
+            if ($processedBatchCount >= $lineBatchSize) {
                 if (!$dryRun) {
                     $this->flushAndClear();
                 }
-
-                $batch = 0;
+                $processedBatchCount = 0;
             }
         }
 
@@ -556,12 +751,20 @@ class ImportTaxonomyCommand extends Command
         }
 
         fclose($handle);
-
         $progress->finish();
-
         $output->writeln('');
     }
 
+    /**
+     * Gets or creates a taxonomy record.
+     *
+     * @param string $name
+     * @param TaxonomyType $type
+     * @param Taxonomy|null $parent
+     * @param boolean $dryRun
+     * @param array $stats
+     * @return Taxonomy
+     */
     private function getOrCreateTaxonomy(
         string $name,
         TaxonomyType $type,
@@ -760,6 +963,30 @@ class ImportTaxonomyCommand extends Command
         }
 
         return $cache[$externalId] = $id;
+    }
+
+    private function getCountryIdByCode(string $countryCode): ?string
+    {
+        $countryCode = strtoupper(trim($countryCode));
+
+        if ($countryCode === '') {
+            return null;
+        }
+
+        if (isset($this->countryIdCache[$countryCode])) {
+            return $this->countryIdCache[$countryCode];
+        }
+
+        $id = $this->connection->fetchOne(
+            'SELECT id FROM fauna_country WHERE code = :code LIMIT 1',
+            ['code' => $countryCode]
+        );
+
+        if (!$id) {
+            return null;
+        }
+
+        return $this->countryIdCache[$countryCode] = (string) $id;
     }
 
     private function countLines(string $file): int
