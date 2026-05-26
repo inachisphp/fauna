@@ -9,26 +9,55 @@
 
 namespace Inachis\Fauna\Command;
 
+use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
+use Inachis\Fauna\Entity\Country;
+use Inachis\Fauna\Entity\Species;
 use Inachis\Fauna\Entity\Taxonomy;
+use Inachis\Fauna\Enum\IucnStatus;
 use Inachis\Fauna\Enum\TaxonomyType;
-use Inachis\Fauna\Repository\TaxonomyRepository;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Helper\ProgressBar;
+use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Style\SymfonyStyle;
 
 #[AsCommand(
     name: 'fauna:import:taxonomy',
-    description: 'Imports taxonomy data from GBIF backbone taxonomy'
+    description: 'Imports taxonomy/species/vernacular/distribution TSV files'
 )]
 class ImportTaxonomyCommand extends Command
 {
-    private const DEFAULT_PATH = 'data/Taxon.tsv';
+    private const BATCH_SIZE = 500;
 
-    private const IMPORT_TYPES = [
-        'domain' => TaxonomyType::DOMAIN,
+    /**
+     * Cached taxonomy entities
+     *
+     * @var array<string, Taxonomy>
+     */
+    private array $taxonomyCache = [];
+
+    /**
+     * Cached countries
+     *
+     * @var array<string, Country>
+     */
+    private array $countryCache = [];
+
+    /**
+     * Cached species IDs by external ID
+     *
+     * @var array<int, Species>
+     */
+    private array $speciesCache = [];
+
+    /**
+     * Accepted taxonomy hierarchy
+     */
+    private const TAXONOMIC_LEVELS = [
         'kingdom' => TaxonomyType::KINGDOM,
         'phylum' => TaxonomyType::PHYLUM,
         'class' => TaxonomyType::CLASS_,
@@ -37,144 +66,251 @@ class ImportTaxonomyCommand extends Command
         'genus' => TaxonomyType::GENUS,
     ];
 
-    private const BATCH_SIZE = 500;
-
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
-        private readonly TaxonomyRepository $taxonomyRepository
+        private readonly Connection $connection
     ) {
         parent::__construct();
     }
 
     protected function configure(): void
     {
-        $this->addOption(
-            'dry-run',
-            null,
-            InputOption::VALUE_NONE,
-            'Parse and validate the source file without writing to the database.'
-        );
-
-        $this->addOption(
-            'clear',
-            null,
-            InputOption::VALUE_NONE,
-            'Clear existing taxonomy data before importing.'
-        );
-
-        $this->addOption(
-            'path',
-            null,
-            InputOption::VALUE_REQUIRED,
-            'Path to the TSV source file.',
-            self::DEFAULT_PATH
-        );
+        $this
+            ->addArgument(
+                'directory',
+                InputArgument::REQUIRED,
+                'Directory containing Taxon.tsv, VernacularName.tsv and Distribution.tsv'
+            )
+            ->addOption(
+                'dry-run',
+                null,
+                InputOption::VALUE_NONE,
+                'Perform import without writing to database'
+            )
+            ->addOption(
+                'clear',
+                null,
+                InputOption::VALUE_NONE,
+                'Clear fauna taxonomy/species tables before import'
+            );
     }
 
-    protected function execute(
-        InputInterface $input,
-        OutputInterface $output
-    ): int {
+    protected function execute(InputInterface $input, OutputInterface $output): int
+    {
+        $io = new SymfonyStyle($input, $output);
+
+        $directory = rtrim((string) $input->getArgument('directory'), DIRECTORY_SEPARATOR);
         $dryRun = (bool) $input->getOption('dry-run');
         $clear = (bool) $input->getOption('clear');
-        $path = $this->resolvePath((string) $input->getOption('path'));
 
-        if (!is_file($path) || !is_readable($path)) {
-            $output->writeln(sprintf('<error>Unable to read taxonomy source file: %s</error>', $path));
-            return Command::FAILURE;
-        }
+        $taxonFile = $directory . DIRECTORY_SEPARATOR . 'Taxon.tsv';
+        $vernacularFile = $directory . DIRECTORY_SEPARATOR . 'VernacularName.tsv';
+        $distributionFile = $directory . DIRECTORY_SEPARATOR . 'Distribution.tsv';
 
-        $output->writeln(sprintf('<info>Reading taxonomy source: %s</info>', $path));
-
-        if ($clear) {
-            if ($dryRun) {
-                $output->writeln('<comment>Dry-run: would clear existing taxonomy table.</comment>');
-            } else {
-                $this->clearTaxonomyTable($output);
+        foreach ([$taxonFile, $vernacularFile, $distributionFile] as $file) {
+            if (!is_file($file)) {
+                $io->error(sprintf('Missing required file: %s', $file));
+                return Command::FAILURE;
             }
         }
 
-        $rows = $this->loadTaxonomyRows($path, $output);
-
-        if ($rows === []) {
-            $output->writeln('<comment>No supported taxonomy rows were found in the source file.</comment>');
-            return Command::SUCCESS;
-        }
-
-        $importIds = $this->resolveAnimaliaImportIds($rows, $output);
-
-        if ($importIds === []) {
-            $output->writeln('<comment>No Animalia taxonomy branch was found in the source file.</comment>');
-            return Command::SUCCESS;
-        }
-
-        $output->writeln(sprintf('<info>Importing %d Animalia taxonomy entries.</info>', count($importIds)));
+        $io->title('Fauna Taxonomy Import');
 
         if ($dryRun) {
-            $output->writeln('<comment>Dry-run complete. No database changes were made.</comment>');
-            return Command::SUCCESS;
+            $io->warning('Running in DRY RUN mode - no data will be persisted');
         }
 
-        $created = $this->createTaxonomyNodes($rows, $importIds, $output);
-        $linked = $this->linkTaxonomyParents($rows, $importIds, $output);
+        if ($clear) {
+            $this->clearTables($io, $dryRun);
+        }
 
-        $output->writeln(sprintf(
-            '<info>Import complete. Created %d nodes and linked %d parent relationships.</info>',
-            $created,
-            $linked
-        ));
+        $stats = [
+            'species_created' => 0,
+            'taxonomy_created' => 0,
+            'vernacular_added' => 0,
+            'countries_added' => 0,
+            'rows_processed' => 0,
+            'rows_skipped' => 0,
+        ];
+
+        $this->warmCaches();
+
+        $io->section('Importing Taxon.tsv');
+        $this->importTaxa(
+            $taxonFile,
+            $stats,
+            $dryRun,
+            $output
+        );
+
+        $io->section('Importing VernacularName.tsv');
+        $this->importVernacularNames(
+            $vernacularFile,
+            $stats,
+            $dryRun,
+            $output
+        );
+
+        $io->section('Importing Distribution.tsv');
+        $this->importDistribution(
+            $distributionFile,
+            $stats,
+            $dryRun,
+            $output
+        );
+
+        if (!$dryRun) {
+            $this->entityManager->flush();
+            $this->entityManager->clear();
+        }
+
+        $io->success('Import complete');
+
+        $io->table(
+            ['Metric', 'Value'],
+            [
+                ['Rows processed', number_format($stats['rows_processed'])],
+                ['Rows skipped', number_format($stats['rows_skipped'])],
+                ['Species created', number_format($stats['species_created'])],
+                ['Taxonomy created', number_format($stats['taxonomy_created'])],
+                ['Vernacular names added', number_format($stats['vernacular_added'])],
+                ['Country associations added', number_format($stats['countries_added'])],
+            ]
+        );
 
         return Command::SUCCESS;
     }
 
-    private function resolvePath(string $path): string
-    {
-        if (str_starts_with($path, DIRECTORY_SEPARATOR) || preg_match('/^[A-Za-z]:[\\\/]/', $path)) {
-            return $path;
-        }
-
-        return getcwd() . DIRECTORY_SEPARATOR . $path;
-    }
-
-    private function loadTaxonomyRows(string $path, OutputInterface $output): array
-    {
-        $handle = fopen($path, 'r');
+    private function importTaxa(
+        string $file,
+        array &$stats,
+        bool $dryRun,
+        OutputInterface $output
+    ): void {
+        $handle = fopen($file, 'rb');
 
         if ($handle === false) {
-            $output->writeln('<error>Unable to open taxonomy source file.</error>');
-            return [];
+            throw new \RuntimeException(sprintf('Unable to open %s', $file));
         }
 
-        $header = fgetcsv($handle, 0, "\t");
+        $headers = fgetcsv($handle, 0, "\t");
 
-        if ($header === false) {
+        if ($headers === false) {
             fclose($handle);
-            $output->writeln('<error>Unable to read TSV header.</error>');
-            return [];
+            throw new \RuntimeException('Invalid TSV header');
         }
 
-        $header = array_map(static fn ($value) => trim((string) $value), $header);
+        $headers = array_map('trim', $headers);
 
-        $required = ['taxonID', 'taxonRank', 'kingdom'];
+        $progressBar = new ProgressBar($output);
+        $progressBar->start();
 
-        foreach ($required as $column) {
-            if (!in_array($column, $header, true)) {
-                fclose($handle);
-                $output->writeln(sprintf('<error>Missing required column: %s</error>', $column));
-                return [];
-            }
-        }
-
-        $hasDomainColumn = in_array('domain', $header, true);
-        $rows = [];
-        $domainName = null;
+        $batchCount = 0;
 
         while (($row = fgetcsv($handle, 0, "\t")) !== false) {
-            if (count($row) !== count($header)) {
+            ++$stats['rows_processed'];
+            $progressBar->advance();
+
+            $data = array_combine($headers, $row);
+
+            if ($data === false) {
+                ++$stats['rows_skipped'];
                 continue;
             }
 
-            $data = array_combine($header, $row);
+            if (!$this->shouldImportTaxon($data)) {
+                ++$stats['rows_skipped'];
+                continue;
+            }
+
+            $parent = null;
+
+            foreach (self::TAXONOMIC_LEVELS as $column => $type) {
+                $value = trim((string) ($data[$column] ?? ''));
+
+                if ($value === '') {
+                    continue;
+                }
+
+                $parent = $this->getOrCreateTaxonomy(
+                    name: $value,
+                    type: $type,
+                    parent: $parent,
+                    dryRun: $dryRun,
+                    stats: $stats
+                );
+            }
+
+            $species = new Species(
+                name: '',
+                latin: trim((string) $data['canonicalName']),
+                iucn: IucnStatus::tryFromValue($data['threatStatus'] ?? null),
+                genus: $parent
+            );
+
+            $species->setExternalId(
+                isset($data['taxonID']) ? (int) $data['taxonID'] : null
+            );
+
+            if (!$dryRun) {
+                $this->entityManager->persist($species);
+            }
+
+            $externalId = (int) ($data['taxonID'] ?? 0);
+
+            if ($externalId > 0) {
+                $this->speciesCache[$externalId] = $species;
+            }
+
+            ++$stats['species_created'];
+            ++$batchCount;
+
+            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
+                $this->flushAndClear();
+                $batchCount = 0;
+            }
+        }
+
+        fclose($handle);
+
+        if (!$dryRun) {
+            $this->entityManager->flush();
+        }
+
+        $progressBar->finish();
+        $output->writeln('');
+    }
+
+    private function importVernacularNames(
+        string $file,
+        array &$stats,
+        bool $dryRun,
+        OutputInterface $output
+    ): void {
+        $handle = fopen($file, 'rb');
+
+        if ($handle === false) {
+            throw new \RuntimeException(sprintf('Unable to open %s', $file));
+        }
+
+        $headers = fgetcsv($handle, 0, "\t");
+
+        if ($headers === false) {
+            fclose($handle);
+            throw new \RuntimeException('Invalid TSV header');
+        }
+
+        $headers = array_map('trim', $headers);
+
+        $progressBar = new ProgressBar($output);
+        $progressBar->start();
+
+        $batchCount = 0;
+
+        while (($row = fgetcsv($handle, 0, "\t")) !== false) {
+            $progressBar->advance();
+
+            $data = array_combine($headers, $row);
 
             if ($data === false) {
                 continue;
@@ -182,241 +318,251 @@ class ImportTaxonomyCommand extends Command
 
             $taxonId = (int) ($data['taxonID'] ?? 0);
 
-            if ($taxonId <= 0) {
+            if ($taxonId === 0 || !isset($this->speciesCache[$taxonId])) {
                 continue;
             }
 
-            $rank = strtolower(trim((string) ($data['taxonRank'] ?? '')));
-            $type = self::IMPORT_TYPES[$rank] ?? null;
+            $vernacular = trim((string) ($data['vernacularName'] ?? ''));
 
-            if ($type === null) {
+            if ($vernacular === '') {
                 continue;
             }
 
-            $kingdom = strtolower(trim((string) ($data['kingdom'] ?? '')));
-            $isAnimalia = $kingdom === 'animalia';
+            $species = $this->speciesCache[$taxonId];
 
-            if (!$isAnimalia && $type !== TaxonomyType::DOMAIN) {
-                continue;
+            if ($species->getName() === '') {
+                $species->setName($vernacular);
+                ++$stats['vernacular_added'];
             }
 
-            if ($hasDomainColumn && $isAnimalia && $domainName === null) {
-                $domainName = trim((string) ($data['domain'] ?? '')) ?: 'Eukarya';
-            }
+            ++$batchCount;
 
-            $rows[$taxonId] = [
-                'externalId' => $taxonId,
-                'parentExternalId' => (int) ($data['parentNameUsageID'] ?? 0),
-                'type' => $type,
-                'name' => trim((string) ($data['scientificName'] ?? '')),
-                'common' => trim((string) ($data['vernacularName'] ?? '')) ?: null,
-                'accepted' => strtolower(trim((string) ($data['taxonomicStatus'] ?? ''))) === 'accepted',
-                'canonicalName' => trim((string) ($data['canonicalName'] ?? '')) ?: null,
-                'kingdom' => $kingdom,
-                'rank' => $rank,
-                'domainName' => $domainName,
-            ];
+            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
+                $this->entityManager->flush();
+                $this->entityManager->clear();
+
+                $batchCount = 0;
+            }
         }
 
         fclose($handle);
 
-        return $rows;
+        if (!$dryRun) {
+            $this->entityManager->flush();
+        }
+
+        $progressBar->finish();
+        $output->writeln('');
     }
 
-    private function resolveAnimaliaImportIds(array $rows, OutputInterface $output): array
-    {
-        $importIds = [];
-        $domainAncestorFound = false;
+    private function importDistribution(
+        string $file,
+        array &$stats,
+        bool $dryRun,
+        OutputInterface $output
+    ): void {
+        $handle = fopen($file, 'rb');
 
-        foreach ($rows as $externalId => $data) {
-            if ($data['kingdom'] !== 'animalia') {
+        if ($handle === false) {
+            throw new \RuntimeException(sprintf('Unable to open %s', $file));
+        }
+
+        $headers = fgetcsv($handle, 0, "\t");
+
+        if ($headers === false) {
+            fclose($handle);
+            throw new \RuntimeException('Invalid TSV header');
+        }
+
+        $headers = array_map('trim', $headers);
+
+        $progressBar = new ProgressBar($output);
+        $progressBar->start();
+
+        $batchCount = 0;
+
+        while (($row = fgetcsv($handle, 0, "\t")) !== false) {
+            $progressBar->advance();
+
+            $data = array_combine($headers, $row);
+
+            if ($data === false) {
                 continue;
             }
 
-            $this->collectAncestorIds($externalId, $rows, $importIds, $domainAncestorFound);
-        }
+            $taxonId = (int) ($data['taxonID'] ?? 0);
+            $countryCode = strtoupper(trim((string) ($data['countryCode'] ?? '')));
 
-        if ($importIds === []) {
-            return [];
-        }
-
-        if (!$domainAncestorFound) {
-            $this->ensureDomainRoot($rows, $importIds);
-        }
-
-        $output->writeln(sprintf('<info>Resolved %d Animalia taxonomy entries.</info>', count($importIds)));
-
-        return $this->sortImportIdsByRank($importIds, $rows);
-    }
-
-    private function collectAncestorIds(int $externalId, array $rows, array &$importIds, bool &$domainAncestorFound): void
-    {
-        if (isset($importIds[$externalId])) {
-            return;
-        }
-
-        if (!isset($rows[$externalId])) {
-            return;
-        }
-
-        $importIds[$externalId] = true;
-
-        if ($rows[$externalId]['type'] === TaxonomyType::DOMAIN) {
-            $domainAncestorFound = true;
-        }
-
-        $parentExternalId = $rows[$externalId]['parentExternalId'];
-
-        if ($parentExternalId > 0) {
-            $this->collectAncestorIds($parentExternalId, $rows, $importIds, $domainAncestorFound);
-        }
-    }
-
-    private function ensureDomainRoot(array &$rows, array &$importIds): void
-    {
-        $domainName = 'Eukarya';
-
-        foreach ($rows as $data) {
-            if ($data['kingdom'] === 'animalia' && !empty($data['domainName'])) {
-                $domainName = $data['domainName'];
-                break;
-            }
-        }
-
-        $rows[0] = [
-            'externalId' => 0,
-            'parentExternalId' => 0,
-            'type' => TaxonomyType::DOMAIN,
-            'name' => $domainName,
-            'common' => null,
-            'accepted' => true,
-            'canonicalName' => null,
-            'kingdom' => 'animalia',
-            'rank' => 'domain',
-            'domainName' => $domainName,
-        ];
-
-        foreach ($rows as &$row) {
-            if ($row['type'] === TaxonomyType::KINGDOM && $row['kingdom'] === 'animalia' && !isset($rows[$row['parentExternalId']])) {
-                $row['parentExternalId'] = 0;
-            }
-        }
-        unset($row);
-
-        $importIds[0] = true;
-    }
-
-    private function sortImportIdsByRank(array $importIds, array $rows): array
-    {
-        $order = array_flip(array_keys(self::IMPORT_TYPES));
-
-        usort($importIds, static function (int $a, int $b) use ($rows, $order): int {
-            $rankA = $rows[$a]['rank'];
-            $rankB = $rows[$b]['rank'];
-
-            $positionA = $order[$rankA] ?? PHP_INT_MAX;
-            $positionB = $order[$rankB] ?? PHP_INT_MAX;
-
-            if ($positionA !== $positionB) {
-                return $positionA <=> $positionB;
-            }
-
-            return $rows[$a]['name'] <=> $rows[$b]['name'];
-        });
-
-        return array_values($importIds);
-    }
-
-    private function createTaxonomyNodes(array $rows, array $importIds, OutputInterface $output): int
-    {
-        $created = 0;
-
-        foreach ($importIds as $externalId) {
-            $row = $rows[$externalId];
-
-            $existing = $this->taxonomyRepository->findOneBy(['externalId' => $externalId]);
-
-            if ($existing !== null) {
+            if (
+                $taxonId === 0 ||
+                $countryCode === '' ||
+                !isset($this->speciesCache[$taxonId])
+            ) {
                 continue;
             }
 
-            $taxonomy = new Taxonomy();
-            $taxonomy->setName($row['name']);
-            $taxonomy->setType($row['type']);
-            $taxonomy->setCommon($row['common']);
-            $taxonomy->setAccepted($row['accepted']);
-            $taxonomy->setCanonicalName($row['canonicalName']);
-            $taxonomy->setExternalId($row['externalId']);
+            $species = $this->speciesCache[$taxonId];
+            $country = $this->getCountryByCode($countryCode);
 
-            $this->entityManager->persist($taxonomy);
-            ++$created;
+            if ($country === null) {
+                continue;
+            }
 
-            if (($created % self::BATCH_SIZE) === 0) {
+            $species->addCountry($country);
+
+            ++$stats['countries_added'];
+            ++$batchCount;
+
+            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
                 $this->entityManager->flush();
                 $this->entityManager->clear();
-                $output->writeln(sprintf('Persisted %d taxonomy nodes...', $created));
+
+                $batchCount = 0;
             }
         }
 
+        fclose($handle);
+
+        if (!$dryRun) {
+            $this->entityManager->flush();
+        }
+
+        $progressBar->finish();
+        $output->writeln('');
+    }
+
+    private function shouldImportTaxon(array $data): bool
+    {
+        if (($data['taxonomicStatus'] ?? '') !== 'accepted') {
+            return false;
+        }
+
+        if (($data['kingdom'] ?? '') !== 'Animalia') {
+            return false;
+        }
+
+        $canonicalName = trim((string) ($data['canonicalName'] ?? ''));
+
+        if ($canonicalName === '') {
+            return false;
+        }
+
+        $taxonRank = strtolower(trim((string) ($data['taxonRank'] ?? '')));
+
+        return in_array(
+            $taxonRank,
+            ['species', 'subspecies'],
+            true
+        );
+    }
+
+    private function getOrCreateTaxonomy(
+        string $name,
+        TaxonomyType $type,
+        ?Taxonomy $parent,
+        bool $dryRun,
+        array &$stats
+    ): Taxonomy {
+        $cacheKey = sprintf(
+            '%s|%s|%s',
+            $type->value,
+            strtolower($name),
+            $parent?->getName() ?? 'root'
+        );
+
+        if (isset($this->taxonomyCache[$cacheKey])) {
+            return $this->taxonomyCache[$cacheKey];
+        }
+
+        $taxonomy = $this->entityManager
+            ->getRepository(Taxonomy::class)
+            ->findOneBy([
+                'name' => $name,
+                'type' => $type,
+                'parent' => $parent,
+            ]);
+
+        if ($taxonomy instanceof Taxonomy) {
+            $this->taxonomyCache[$cacheKey] = $taxonomy;
+            return $taxonomy;
+        }
+
+        $taxonomy = new Taxonomy(
+            name: $name,
+            type: $type,
+            parent: $parent
+        );
+
+        $taxonomy->setCanonicalName($name);
+        $taxonomy->setAccepted(true);
+
+        if (!$dryRun) {
+            $this->entityManager->persist($taxonomy);
+        }
+
+        ++$stats['taxonomy_created'];
+
+        $this->taxonomyCache[$cacheKey] = $taxonomy;
+
+        return $taxonomy;
+    }
+
+    private function getCountryByCode(string $code): ?Country
+    {
+        if (isset($this->countryCache[$code])) {
+            return $this->countryCache[$code];
+        }
+
+        $country = $this->entityManager
+            ->getRepository(Country::class)
+            ->findOneBy([
+                'code' => $code,
+            ]);
+
+        if ($country instanceof Country) {
+            $this->countryCache[$code] = $country;
+        }
+
+        return $country;
+    }
+
+    private function clearTables(SymfonyStyle $io, bool $dryRun): void
+    {
+        $io->warning('Clearing fauna tables');
+
+        if ($dryRun) {
+            return;
+        }
+
+        $this->connection->executeStatement(
+            'DELETE FROM fauna_species_to_country'
+        );
+
+        $this->connection->executeStatement(
+            'DELETE FROM fauna_species'
+        );
+
+        $this->connection->executeStatement(
+            'DELETE FROM fauna_taxonomy'
+        );
+    }
+
+    private function warmCaches(): void
+    {
+        foreach (
+            $this->entityManager
+                ->getRepository(Country::class)
+                ->findAll() as $country
+        ) {
+            $this->countryCache[$country->getCode()] = $country;
+        }
+    }
+
+    private function flushAndClear(): void
+    {
         $this->entityManager->flush();
         $this->entityManager->clear();
 
-        return $created;
-    }
-
-    private function linkTaxonomyParents(array $rows, array $importIds, OutputInterface $output): int
-    {
-        $linked = 0;
-
-        foreach ($importIds as $externalId) {
-            $row = $rows[$externalId];
-            $parentId = $row['parentExternalId'];
-
-            if ($parentId < 0 || $parentId === $externalId || !in_array($parentId, $importIds, true)) {
-                continue;
-            }
-
-            $taxonomy = $this->taxonomyRepository->findOneBy(['externalId' => $externalId]);
-
-            if ($taxonomy === null) {
-                continue;
-            }
-
-            $parent = $this->taxonomyRepository->findOneBy(['externalId' => $parentId]);
-
-            if ($parent === null) {
-                continue;
-            }
-
-            $taxonomy->setParent($parent);
-            ++$linked;
-
-            if (($linked % self::BATCH_SIZE) === 0) {
-                $this->entityManager->flush();
-                $this->entityManager->clear();
-                $output->writeln(sprintf('Linked %d taxonomy parent relationships...', $linked));
-            }
-        }
-
-        $this->entityManager->flush();
-
-        return $linked;
-    }
-
-    private function clearTaxonomyTable(OutputInterface $output): void
-    {
-        $connection = $this->entityManager->getConnection();
-        $platform = $connection->getDatabasePlatform();
-
-        $this->entityManager->beginTransaction();
-
-        try {
-            $connection->executeStatement($platform->getTruncateTableSQL('fauna_taxonomy', true));
-            $this->entityManager->commit();
-            $output->writeln('<info>Cleared existing fauna_taxonomy table.</info>');
-        } catch (\Throwable $exception) {
-            $this->entityManager->rollback();
-            throw $exception;
-        }
+        gc_collect_cycles();
     }
 }
