@@ -47,7 +47,7 @@ class ImportTaxonomyCommand extends Command
         OutputInterface $output
     ): int {
 
-        $path = '/var/data/gbif/Taxon.tsv';
+        $path = 'data/gbif/Taxon.tsv';
 
         if (!file_exists($path)) {
             $output->writeln('<error>Taxon.tsv not found</error>');
