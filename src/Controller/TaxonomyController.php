@@ -35,8 +35,8 @@ class TaxonomyController extends AbstractController
         $children = $taxonomy->getChildren()->toArray();
 
         usort($children, function ($a, $b) {
-            $typeComparison = $a->getType()->sortOrder()
-                <=> $b->getType()->sortOrder();
+            $typeComparison = $a->getTypeEnum()?->sortOrder()
+                <=> $b->getTypeEnum()?->sortOrder();
 
             if ($typeComparison !== 0) {
                 return $typeComparison;

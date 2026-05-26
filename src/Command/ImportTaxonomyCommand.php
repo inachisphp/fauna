@@ -101,6 +101,13 @@ class ImportTaxonomyCommand extends Command
             )
             
             ->addOption(
+                'patch-ids',
+                null,
+                InputOption::VALUE_NONE,
+                'One-time patch to backfill missing external_id links on high-level taxonomy entries based on Taxon.tsv data'
+            )
+
+            ->addOption(
                 'import-taxonomy',
                 null,
                 InputOption::VALUE_NONE,
@@ -150,13 +157,15 @@ class ImportTaxonomyCommand extends Command
         $dryRun = (bool) $input->getOption('dry-run');
         $clear = (bool) $input->getOption('clear');
 
+        $patchIds = (bool) $input->getOption('patch-ids');
         $importTaxa = (bool) $input->getOption('import-taxonomy');
         $importVernacular = (bool) $input->getOption('import-vernacular');
         $importDistribution = (bool) $input->getOption('import-distribution');
 
         // If no specific import options are provided, import all.
         if (
-            !$importTaxa
+            !$patchIds
+            && !$importTaxa
             && !$importVernacular
             && !$importDistribution
         ) {
@@ -179,6 +188,14 @@ class ImportTaxonomyCommand extends Command
             'vernacular_updated' => 0,
             'distribution_updated' => 0,
         ];
+
+        if ($patchIds) {
+            $this->patchTaxonomyIds(
+                $directory . '/Taxon.tsv',
+                $dryRun,
+                $output
+            );
+        }
 
         if ($importTaxa) {
             $io->section(sprintf('Importing Taxon.tsv (%d lines)', $this->countLines($directory . '/Taxon.tsv')));
@@ -244,6 +261,169 @@ class ImportTaxonomyCommand extends Command
         }
 
         return Command::SUCCESS;
+    }
+
+    /**
+     * One-time helper to scan Taxon.tsv and backfill external_id attributes 
+     * for matching high-level taxonomy rows already present in the database.
+     */
+    /**
+     * One-time helper to scan Taxon.tsv and backfill external_id attributes 
+     * for matching high-level taxonomy rows already present in the database,
+     * validating parent associations to safely bypass homonyms.
+     */
+    private function patchTaxonomyIds(
+        string $file,
+        bool $dryRun,
+        OutputInterface $output
+    ): void {
+        if (!is_file($file)) {
+            $output->writeln('<error>Taxon.tsv not found for patching.</error>');
+            return;
+        }
+
+        $handle = fopen($file, 'rb');
+        if ($handle === false) {
+            return;
+        }
+
+        $headers = fgetcsv($handle, 0, "\t", '"', '\\');
+        $headers = array_map('trim', $headers);
+        
+        $output->writeln('<info>Safe-patching missing high-level taxonomy external_id rows...</info>');
+        $progress = new ProgressBar($output);
+        $progress->start();
+
+        $updated = 0;
+        $batch = 0;
+
+        // Map TSV lower-case ranks to your internal database Enum values
+        $enumTypeMap = [
+            'kingdom' => 'kingdom',
+            'phylum'  => 'phylum',
+            'class'   => 'class',
+            'order'   => 'order',
+            'family'  => 'family',
+            'genus'   => 'genus',
+        ];
+
+        while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
+            $progress->advance();
+            if (count($row) !== count($headers)) {
+                continue;
+            }
+
+            $data = array_combine($headers, $row);
+            $rank = strtolower(trim((string) ($data['taxonRank'] ?? '')));
+            
+            // Skip terminal leaves like species or subspecies
+            if (in_array($rank, ['species', 'subspecies'], true)) {
+                continue;
+            }
+
+            $taxonId = isset($data['taxonID']) ? (int) $data['taxonID'] : null;
+            $canonicalName = trim((string) ($data['canonicalName'] ?? ''));
+
+            if ($taxonId === null || $canonicalName === '' || !isset($enumTypeMap[$rank])) {
+                continue;
+            }
+
+            $internalType = $enumTypeMap[$rank];
+
+            // --- DETECT PARENT VALUE FOR TREE VERIFICATION ---
+            // Build the tier priorities to discover who this item's immediate populated parent is
+            $levelOrder = ['genus', 'family', 'order', 'class', 'phylum', 'kingdom'];
+            $currentIndex = array_search($rank, $levelOrder, true);
+            
+            $parentName = null;
+            $parentType = null;
+
+            if ($currentIndex !== false) {
+                // Read backwards up the columns to find the nearest non-empty ancestor
+                for ($i = $currentIndex + 1; $i < count($levelOrder); $i++) {
+                    $ancestorColumn = $levelOrder[$i];
+                    if ($ancestorColumn === 'class') {
+                        $ancestorColumn = 'class_'; // Account for class keyword extensions if needed
+                    }
+                    
+                    // Normalize keyword mapping back to standard column names
+                    $colKey = ($ancestorColumn === 'class_') ? 'class' : $ancestorColumn;
+                    $ancestorValue = trim((string) ($data[$colKey] ?? ''));
+
+                    if ($ancestorValue !== '') {
+                        $parentName = $ancestorValue;
+                        $parentType = $enumTypeMap[($colKey === 'class') ? 'class' : $colKey];
+                        break;
+                    }
+                }
+            }
+
+            // Resolve the active target entity ID matching both self criteria and parent tree
+            $targetId = null;
+            if ($parentName !== null && $parentType !== null) {
+                $targetId = $this->connection->fetchOne(
+                    'SELECT child.id 
+                     FROM fauna_taxonomy child
+                     JOIN fauna_taxonomy parent ON child.parent_id = parent.id
+                     WHERE child.name = :name 
+                       AND child.type = :type 
+                       AND child.external_id IS NULL
+                       AND parent.name = :p_name 
+                       AND parent.type = :p_type
+                     LIMIT 1',
+                    [
+                        'name'   => $canonicalName,
+                        'type'   => $internalType,
+                        'p_name' => $parentName,
+                        'p_type' => $parentType
+                    ]
+                );
+            } else {
+                // Root nodes (e.g. Kingdom Animalia) won't have a parent
+                $targetId = $this->connection->fetchOne(
+                    'SELECT id 
+                     FROM fauna_taxonomy 
+                     WHERE name = :name 
+                       AND type = :type 
+                       AND parent_id IS NULL 
+                       AND external_id IS NULL
+                     LIMIT 1',
+                    [
+                        'name' => $canonicalName,
+                        'type' => $internalType
+                    ]
+                );
+            }
+
+            // --- EXECUTE SAFE BOUNDED UPDATE ---
+            if (!$dryRun && $targetId !== false) {
+                // MariaDB allows LIMIT 1 constraints directly on primary key evaluations 
+                $affected = $this->connection->executeStatement(
+                    'UPDATE fauna_taxonomy 
+                     SET external_id = :ext_id 
+                     WHERE id = :id 
+                     LIMIT 1',
+                    [
+                        'ext_id' => $taxonId,
+                        'id'     => $targetId
+                    ]
+                );
+
+                if ($affected > 0) {
+                    $updated++;
+                    $batch++;
+                    if ($batch >= 250) {
+                        $batch = 0;
+                        gc_collect_cycles();
+                    }
+                }
+            }
+        }
+
+        fclose($handle);
+        $progress->finish();
+        $output->writeln('');
+        $output->writeln(sprintf('<info>Patch complete. Safely backfilled external_id constraints on %s taxonomy tiers.</info>', number_format($updated)));
     }
 
     /**
@@ -321,6 +501,8 @@ class ImportTaxonomyCommand extends Command
             }
 
             $parent = null;
+            $rowRank = strtolower(trim((string) ($data['taxonRank'] ?? '')));
+            $taxonIdAttr = isset($data['taxonID']) ? (int) $data['taxonID'] : null;
 
             $levels = [
                 'kingdom' => TaxonomyType::KINGDOM,
@@ -331,19 +513,23 @@ class ImportTaxonomyCommand extends Command
                 'genus' => TaxonomyType::GENUS,
             ];
 
-            foreach ($levels as $column => $type) {
+            foreach ($levels as $column => $meta) {
+                [$type, $rankName] = $meta;
                 $value = trim((string) ($data[$column] ?? ''));
 
                 if ($value === '') {
                     continue;
                 }
 
+                $passId = ($rowRank === $rankName) ? $taxonIdAttr : null;
+
                 $parent = $this->getOrCreateTaxonomy(
                     $value,
                     $type,
                     $parent,
                     $dryRun,
-                    $stats
+                    $stats,
+                    $passId
                 );
             }
 
@@ -425,7 +611,8 @@ class ImportTaxonomyCommand extends Command
 
         $batch = 0;
         
-        // This memory cache keeps track of names assigned during *this script execution* // to bypass continuous database SELECT overhead.
+        // Memory cache to keep track of names assigned during this script run 
+        // to minimize database SELECT overhead across fragmented files.
         $assignedNamesCache = [];
 
         // Helper closure to evaluate which of two names is superior
@@ -439,17 +626,17 @@ class ImportTaxonomyCommand extends Command
             $isCapOld = ctype_upper(substr($existingName, 0, 1));
             
             if ($isCapNew !== $isCapOld) {
-                return $isCapNew && !$isCapOld; // true if new is capitalized and old is not
+                return $isCapNew && !$isCapOld;
             }
 
-            // 2. Sort by string length descending (prefer descriptive over generic)
+            // 2. Prefer longer/descriptive strings (e.g., "European Peacock Butterfly" > "Peacock")
             $lenNew = strlen($newCandidate);
             $lenOld = strlen($existingName);
             if ($lenNew !== $lenOld) {
                 return $lenNew > $lenOld;
             }
 
-            // 3. Fallback to case-insensitive alphabetical sorting for absolute consistency
+            // 3. Fallback to case-insensitive alphabetical sorting for consistency
             return strcasecmp($newCandidate, $existingName) < 0;
         };
 
@@ -481,46 +668,92 @@ class ImportTaxonomyCommand extends Command
                 continue;
             }
 
+            // --- RESOLVE TARGET DETAILS ---
             $speciesId = $this->getSpeciesIdByExternalId($taxonId);
-            if ($speciesId === null) {
+            $taxonomyId = null;
+            $tableName = null;
+            $targetId = null;
+
+            if ($speciesId !== null) {
+                $targetId = $speciesId;
+                $tableName = 'fauna_species';
+            } else {
+                // If not found in species, fallback to check high-level taxonomy structural rows
+                $taxonomyId = $this->getTaxonomyIdByExternalId($taxonId);
+                if ($taxonomyId !== null) {
+                    $targetId = $taxonomyId;
+                    $tableName = 'fauna_taxonomy';
+                }
+            }
+
+            // If it maps to neither, skip out early
+            if ($targetId === null) {
                 ++$stats['skipped'];
                 continue;
             }
 
-            // Find what name this species currently has (check local cache first, then database)
+            // Determine what name this target currently has (using cache first, then database)
             $currentName = null;
-            if (isset($assignedNamesCache[$speciesId])) {
-                $currentName = $assignedNamesCache[$speciesId];
+            $cacheKey = $tableName . '|' . $targetId;
+
+            if (isset($assignedNamesCache[$cacheKey])) {
+                $currentName = $assignedNamesCache[$cacheKey];
             } else {
-                $currentName = $this->connection->fetchOne(
-                    'SELECT name FROM fauna_species WHERE id = :id LIMIT 1',
-                    ['id' => $speciesId]
+                // For fauna_taxonomy, we read from the 'common' column; for fauna_species, from 'name'
+                $columnName = ($tableName === 'fauna_taxonomy') ? 'common' : 'name';
+                
+                $dbName = $this->connection->fetchOne(
+                    "SELECT {$columnName} FROM {$tableName} WHERE id = :id LIMIT 1",
+                    ['id' => $targetId]
                 );
-                if ($currentName === false) {
-                    $currentName = null;
-                }
+                $currentName = $dbName !== false ? $dbName : null;
             }
 
-            // Compare the names using our priority rules
+            // Compare names using our preference rules
             if ($isBetterName($vernacular, $currentName)) {
-                $species = $this->entityManager->getReference(
-                    Species::class,
-                    \Ramsey\Uuid\Uuid::fromString($speciesId)
-                );
+                if ($tableName === 'fauna_species') {
+                    $species = $this->entityManager->getReference(
+                        Species::class,
+                        \Ramsey\Uuid\Uuid::fromString($targetId)
+                    );
 
-                if (method_exists($species, 'setName')) {
-                    $species->setName($vernacular);
-                    $assignedNamesCache[$speciesId] = $vernacular;
-                    
-                    ++$stats['vernacular_updated'];
-                    ++$batch;
-
-                    if ($batch >= self::BATCH_SIZE) {
-                        if (!$dryRun) {
-                            $this->flushAndClear();
-                        }
-                        $batch = 0;
+                    if (method_exists($species, 'setName')) {
+                        $species->setName($vernacular);
+                        $assignedNamesCache[$cacheKey] = $vernacular;
+                        ++$stats['vernacular_updated'];
+                        ++$batch;
                     }
+                } else {
+                    $taxonomy = $this->entityManager->getReference(
+                        Taxonomy::class,
+                        \Ramsey\Uuid\Uuid::fromString($targetId)
+                    );
+
+                    // Handles whichever setter name matches your entity structure ('setCommon' vs 'setName')
+                    if (method_exists($taxonomy, 'setCommon')) {
+                        $taxonomy->setCommon($vernacular);
+                        $assignedNamesCache[$cacheKey] = $vernacular;
+                        ++$stats['vernacular_updated'];
+                        ++$batch;
+                    } elseif (method_exists($taxonomy, 'setName')) {
+                        // Optional fallback if your taxonomy model uses setName instead of setCommon
+                        $taxonomy->setName($vernacular);
+                        $assignedNamesCache[$cacheKey] = $vernacular;
+                        ++$stats['vernacular_updated'];
+                        ++$batch;
+                    }
+                }
+
+                // Batch flushing management
+                if ($batch >= self::BATCH_SIZE) {
+                    if (!$dryRun) {
+                        $this->flushAndClear();
+                        // Clear local memory lookup bounds selectively if file explodes
+                        if (count($assignedNamesCache) > 50000) {
+                            $assignedNamesCache = [];
+                        }
+                    }
+                    $batch = 0;
                 }
             } else {
                 ++$stats['skipped'];
@@ -534,6 +767,29 @@ class ImportTaxonomyCommand extends Command
         fclose($handle);
         $progress->finish();
         $output->writeln('');
+    }
+
+    /**
+     * Helper to look up a taxonomy record ID by its external_id
+     */
+    private function getTaxonomyIdByExternalId(int $externalId): ?string
+    {
+        static $taxCache = [];
+
+        if (isset($taxCache[$externalId])) {
+            return $taxCache[$externalId];
+        }
+
+        $id = $this->connection->fetchOne(
+            'SELECT id FROM fauna_taxonomy WHERE external_id = :external_id LIMIT 1',
+            ['external_id' => $externalId]
+        );
+
+        if (!$id) {
+            return null;
+        }
+
+        return $taxCache[$externalId] = (string) $id;
     }
 
     /**
@@ -770,7 +1026,8 @@ class ImportTaxonomyCommand extends Command
         TaxonomyType $type,
         ?Taxonomy $parent,
         bool $dryRun,
-        array &$stats
+        array &$stats,
+        ?int $externalId = null
     ): Taxonomy {
         $parentId = $parent?->getId()?->toString();
 
@@ -782,61 +1039,53 @@ class ImportTaxonomyCommand extends Command
         );
 
         if (isset($this->pendingTaxonomyCache[$cacheKey])) {
+            // Update external ID if discovered on a cached object
+            if ($externalId !== null && method_exists($this->pendingTaxonomyCache[$cacheKey], 'setExternalId')) {
+                $this->pendingTaxonomyCache[$cacheKey]->setExternalId($externalId);
+            }
             return $this->pendingTaxonomyCache[$cacheKey];
         }
 
         if (isset($this->taxonomyIdCache[$cacheKey])) {
-            return $this->entityManager->getReference(
-                Taxonomy::class,
-                Uuid::fromString(
-                    $this->taxonomyIdCache[$cacheKey]
-                )
-            );
+            $ref = $this->entityManager->getReference(Taxonomy::class, Uuid::fromString($this->taxonomyIdCache[$cacheKey]));
+            if ($externalId !== null) {
+                // If already in DB, update external_id immediately via a simple update statement
+                $this->connection->executeStatement(
+                    'UPDATE fauna_taxonomy SET external_id = :ext_id WHERE id = :id AND external_id IS NULL',
+                    ['ext_id' => $externalId, 'id' => $this->taxonomyIdCache[$cacheKey]]
+                );
+            }
+            return $ref;
         }
 
         $existingId = $this->connection->fetchOne(
-            '
-            SELECT id
-            FROM fauna_taxonomy
-            WHERE name = :name
-            AND type = :type
-            AND (
-                (:parent IS NULL AND parent_id IS NULL)
-                OR parent_id = :parent
-            )
-            LIMIT 1
-            ',
-            [
-                'name' => $name,
-                'type' => $type->value,
-                'parent' => $parentId,
-            ]
+            'SELECT id FROM fauna_taxonomy WHERE name = :name AND type = :type AND ((:parent IS NULL AND parent_id IS NULL) OR parent_id = :parent) LIMIT 1',
+            ['name' => $name, 'type' => $type->value, 'parent' => $parentId]
         );
 
         if ($existingId !== false) {
             $this->taxonomyIdCache[$cacheKey] = $existingId;
-
-            return $this->entityManager->getReference(
-                Taxonomy::class,
-                Uuid::fromString($existingId)
-            );
+            if ($externalId !== null) {
+                $this->connection->executeStatement(
+                    'UPDATE fauna_taxonomy SET external_id = :ext_id WHERE id = :id AND external_id IS NULL',
+                    ['ext_id' => $externalId, 'id' => $existingId]
+                );
+            }
+            return $this->entityManager->getReference(Taxonomy::class, Uuid::fromString($existingId));
         }
 
-        $taxonomy = new Taxonomy(
-            name: $name,
-            type: $type,
-            parent: $parent
-        );
-
+        $taxonomy = new Taxonomy(name: $name, type: $type, parent: $parent);
         $taxonomy->setCanonicalName($name);
         $taxonomy->setAccepted(true);
+        if ($externalId !== null && method_exists($taxonomy, 'setExternalId')) {
+            $taxonomy->setExternalId($externalId);
+        }
 
         if (!$dryRun) {
             $this->entityManager->persist($taxonomy);
         }
 
         $this->pendingTaxonomyCache[$cacheKey] = $taxonomy;
-
         ++$stats['taxonomy_created'];
 
         return $taxonomy;
