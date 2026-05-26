@@ -8,19 +8,5 @@ services:
         exclude:
             - '../../DependencyInjection/'
             - '../../Entity/'
-            - '../../Command/'
-            - '../../Repository/'
-            - '../../Controller/'
-
-    Inachis\Fauna\Command\:
-        resource: '../../Command/'
-        tags: ['console.command']
-
-    Inachis\Fauna\Controller\:
-        resource: '../../Controller/'
-        tags: ['controller.service_arguments']
-
-    Inachis\Fauna\Repository\:
-        resource: '../../Repository/'
-        tags: ['doctrine.repository_service']
+            - '../../Resources/'
 
