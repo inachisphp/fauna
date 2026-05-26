@@ -24,6 +24,20 @@ class TaxonomyRepository extends ServiceEntityRepository
     }
 
     /**
+     * @return array<Taxonomy>
+     */
+    public function getPath(Taxonomy $taxonomy): array
+    {
+        $path = [];
+        $current = $taxonomy;
+        while ($current !== null) {
+            array_unshift($path, $current);
+            $current = $current->getParent();
+        }
+        return $path;
+    }
+
+    /**
      * Find taxonomy entries by type
      *
      * @param string $type

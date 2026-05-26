@@ -4,6 +4,6 @@ doctrine:
             FaunaBundle:
                 is_bundle: false
                 type: attribute
-                dir: '%kernel.project_dir%/vendor/jedi58/inachis-fauna/src/Entity'
+                dir: '%kernel.project_dir%/vendor/inachisphp/fauna/src/Entity'
                 prefix: 'Inachis\Fauna\Entity'
                 alias: FaunaBundle
