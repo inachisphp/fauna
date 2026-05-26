@@ -1,0 +1,70 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Your Lifelist - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    {% for label, messages in app.flashes %}
+        {% for message in messages %}
+            <div class="fauna-alert fauna-alert-{{ label }}" role="alert">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endfor %}
+
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+        <div>
+            <h1>Your Lifelist</h1>
+            <p style="color: var(--fauna-text-muted); margin: 0;">You have recorded {{ resultCount }} unique species.</p>
+        </div>
+        <div>
+            <a href="{{ path('fauna_sighting_new') }}" class="fauna-btn" role="button">Add Sighting</a>
+            <a href="{{ path('fauna_trip_list') }}" class="fauna-btn" style="background-color: #2b3b2b;" role="button">My Trips</a>
+        </div>
+    </header>
+
+    {% if results is not empty %}
+        <ul id="lifelist" style="list-style: none; padding: 0;">
+            {% for species in results %}
+                <li class="fauna-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h2 style="font-size: 1.25rem; margin: 0;">
+                                <a href="{{ path('fauna_species_show', {id: species.id.toString()}) }}">
+                                    {{ species.name }}
+                                </a>
+                            </h2>
+                            <em style="color: var(--fauna-text-muted); font-size: 0.95rem;">{{ species.latin }}</em>
+                        </div>
+                        <div>
+                            {% if species.iucn %}
+                                <span class="fauna-iucn-badge" aria-label="IUCN conservation status: {{ species.iucn }}">{{ species.iucn }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+
+        {% if totalPages > 1 %}
+            <nav aria-label="Lifelist pagination" style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 2rem;">
+                {% if page > 1 %}
+                    <a href="{{ path('fauna_lifelist', {page: page - 1}) }}" class="fauna-btn" style="padding: 0.5rem 1rem;">Previous</a>
+                {% endif %}
+                <span style="align-self: center; color: var(--fauna-text-muted);">Page {{ page }} of {{ totalPages }}</span>
+                {% if page < totalPages %}
+                    <a href="{{ path('fauna_lifelist', {page: page + 1}) }}" class="fauna-btn" style="padding: 0.5rem 1rem;">Next</a>
+                {% endif %}
+            </nav>
+        {% endif %}
+    {% else %}
+        <div class="fauna-card" style="text-align: center; padding: 3rem 1.5rem;">
+            <h2>No sightings recorded yet!</h2>
+            <p style="color: var(--fauna-text-muted); margin-bottom: 1.5rem;">Start building your lifelist by adding your first wildlife sighting.</p>
+            <a href="{{ path('fauna_sighting_new') }}" class="fauna-btn" role="button">Log a Sighting</a>
+        </div>
+    {% endif %}
+</main>
+{% endblock %}

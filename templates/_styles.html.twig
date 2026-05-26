@@ -1,0 +1,229 @@
+<style>
+:root {
+  --fauna-bg: #121512;
+  --fauna-card-bg: rgba(28, 36, 28, 0.8);
+  --fauna-border: #2f432f;
+  --fauna-text: #f4fcf4;
+  --fauna-text-muted: #a6c0a6;
+  --fauna-primary: #52a452;
+  --fauna-primary-hover: #6bc26b;
+  --fauna-accent: #ffcc00;
+  --fauna-danger: #ff5555;
+  --fauna-focus: #00ddff;
+  --fauna-font: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Base Accessibility overrides */
+.fauna-container {
+  font-family: var(--fauna-font);
+  color: var(--fauna-text);
+  background-color: var(--fauna-bg);
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  box-sizing: border-box;
+}
+
+.fauna-container *:focus-visible {
+  outline: 3px solid var(--fauna-focus) !important;
+  outline-offset: 3px !important;
+}
+
+.fauna-container h1, 
+.fauna-container h2, 
+.fauna-container h3, 
+.fauna-container h4 {
+  color: #ffffff;
+  font-weight: 700;
+  margin-top: 0;
+}
+
+.fauna-container a {
+  color: var(--fauna-primary-hover);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  transition: color 0.2s ease;
+  padding: 4px 8px;
+  display: inline-block;
+}
+
+.fauna-container a:hover, 
+.fauna-container a:focus {
+  color: #ffffff;
+  background-color: var(--fauna-primary);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+/* Premium Card Design */
+.fauna-card {
+  background: var(--fauna-card-bg);
+  border: 1px solid var(--fauna-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease;
+}
+
+@media (hover: hover) {
+  .fauna-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--fauna-primary);
+  }
+}
+
+/* Classification hierarchy path list */
+.fauna-taxonomy-path {
+  display: flex;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.fauna-taxonomy-path li:not(:last-child)::after {
+  content: "→";
+  margin-left: 0.5rem;
+  color: var(--fauna-text-muted);
+}
+
+.fauna-tax-badge {
+  background: #1b271b;
+  border: 1px solid var(--fauna-border);
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+}
+
+.fauna-tax-badge strong {
+  text-transform: capitalize;
+  color: var(--fauna-text-muted);
+}
+
+/* Clean accessible form style */
+.fauna-form-group {
+  margin-bottom: 1.5rem;
+}
+
+.fauna-form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #ffffff;
+}
+
+.fauna-form-group input,
+.fauna-form-group select,
+.fauna-form-group textarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--fauna-border);
+  background-color: #1a221a;
+  color: #ffffff;
+  font-size: 1rem;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fauna-form-group input:focus,
+.fauna-form-group select:focus,
+.fauna-form-group textarea:focus {
+  border-color: var(--fauna-primary);
+  box-shadow: 0 0 0 2px var(--fauna-border);
+}
+
+.fauna-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--fauna-primary);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  min-height: 44px;
+  text-decoration: none !important;
+  transition: background-color 0.2s ease;
+}
+
+.fauna-btn:hover,
+.fauna-btn:focus {
+  background-color: var(--fauna-primary-hover);
+  color: #ffffff;
+}
+
+.fauna-btn-danger {
+  background-color: var(--fauna-danger);
+}
+
+.fauna-btn-danger:hover,
+.fauna-btn-danger:focus {
+  background-color: #ff3333;
+}
+
+/* Alert notifications styling */
+.fauna-alert {
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1.5rem;
+  font-weight: 500;
+}
+
+.fauna-alert-success {
+  background-color: #1d3a1d;
+  border: 1px solid #2e5c2e;
+  color: #d1ffd1;
+}
+
+.fauna-alert-danger {
+  background-color: #3d1d1d;
+  border: 1px solid #5c2e2e;
+  color: #ffd1d1;
+}
+
+/* Map canvas default styling */
+.fauna-map {
+  height: 300px;
+  border-radius: 12px;
+  border: 1px solid var(--fauna-border);
+  margin: 1rem 0;
+  background-color: #1b201b;
+}
+
+.fauna-iucn-badge {
+  display: inline-block;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 0.75rem;
+  color: #000;
+  background-color: var(--fauna-accent);
+}
+
+/* Photo box */
+.fauna-photo-container {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.fauna-photo {
+  max-width: 100%;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--fauna-border);
+}
+
+.fauna-photo-author {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--fauna-text-muted);
+  margin-top: 0.5rem;
+}
+</style>

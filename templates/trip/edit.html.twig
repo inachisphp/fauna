@@ -1,0 +1,60 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ is_new ? 'Plan New Trip' : 'Edit Trip: ' ~ trip.name }} - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+        {% if is_new %}
+            <a href="{{ path('fauna_trip_list') }}">← My Trips</a>
+        {% else %}
+            <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}">← {{ trip.name }}</a>
+        {% endif %}
+    </nav>
+
+    <h1>{{ is_new ? 'Plan New Trip' : 'Edit Trip' }}</h1>
+
+    <div class="fauna-card">
+        {{ form_start(form, {'attr': {'novalidate': 'novalidate'}}) }}
+
+            <div class="fauna-form-group">
+                {{ form_label(form.name, 'Trip Name') }}
+                {{ form_widget(form.name, {'attr': {'autofocus': true, 'aria-required': 'true'}}) }}
+                {{ form_errors(form.name) }}
+            </div>
+
+            <div class="fauna-form-group">
+                {{ form_label(form.location, 'Location') }}
+                {{ form_widget(form.location) }}
+                {{ form_errors(form.location) }}
+                <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin-top: 0.25rem;">A descriptive location name, e.g. "Yorkshire Dales" or "Kenya Safari".</p>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div class="fauna-form-group">
+                    {{ form_label(form.startDate, 'Start Date') }}
+                    {{ form_widget(form.startDate) }}
+                    {{ form_errors(form.startDate) }}
+                </div>
+                <div class="fauna-form-group">
+                    {{ form_label(form.endDate, 'End Date') }}
+                    {{ form_widget(form.endDate) }}
+                    {{ form_errors(form.endDate) }}
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+                <button type="submit" class="fauna-btn">{{ is_new ? 'Create Trip' : 'Save Changes' }}</button>
+                {% if is_new %}
+                    <a href="{{ path('fauna_trip_list') }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+                {% else %}
+                    <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+                {% endif %}
+            </div>
+
+        {{ form_end(form) }}
+    </div>
+</main>
+{% endblock %}

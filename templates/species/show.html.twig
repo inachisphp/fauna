@@ -1,0 +1,79 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ species.name }} - Species Details{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    <nav aria-label="Breadcrumb">
+        <a href="{{ path('fauna_lifelist') }}">Back to Lifelist</a>
+    </nav>
+
+    <article class="fauna-card" itemscope itemtype="https://schema.org/Taxon">
+        <header>
+            <h1 itemprop="name">{{ species.name }}</h1>
+            <p itemprop="scientificName" class="tax_scientific" style="font-size: 1.25rem; font-style: italic; margin-top: -0.5rem; color: var(--fauna-text-muted);">
+                {{ species.latin }}
+            </p>
+        </header>
+
+        {% if species.iucn %}
+            <div style="margin-bottom: 1rem;">
+                <span class="fauna-iucn-badge" aria-label="IUCN Conservation Status: {{ species.iucn }}">
+                    IUCN: {{ species.iucn }}
+                </span>
+            </div>
+        {% endif %}
+
+        {% if species.images is not empty %}
+            {% set firstImage = species.images|first %}
+            <div class="fauna-photo-container" itemscope itemtype="https://schema.org/Photograph">
+                <img src="{{ firstImage.url }}" alt="Photograph of {{ species.name }}" class="fauna-photo" itemprop="image">
+                {% if firstImage.author %}
+                    <span class="fauna-photo-author" itemprop="author">Photo by {{ firstImage.author }}</span>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <section aria-labelledby="classification-title">
+            <h2 id="classification-title" class="classification" style="font-size: 1.2rem; margin-top: 1.5rem;">Classification</h2>
+            <ul class="fauna-taxonomy-path" id="taxonomy">
+                {% for tax in taxonomy_path %}
+                    <li>
+                        <a class="fauna-tax-badge" href="{{ path('fauna_taxonomy_show', {id: tax.id.toString()}) }}" title="View taxonomic level {{ tax.name }}">
+                            <strong>{{ tax.type }}:</strong> <em>{{ tax.name }}</em> {% if tax.common %}({{ tax.common }}){% endif %}
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        {% if species.description %}
+            <section aria-labelledby="about-title" style="margin-top: 1.5rem;">
+                <h2 id="about-title">About</h2>
+                <div itemprop="description">
+                    <p>{{ species.description|nl2br }}</p>
+                </div>
+            </section>
+        {% endif %}
+
+        {% if related|length > 1 %}
+            <section aria-labelledby="related-title" style="margin-top: 1.5rem;">
+                <h3 id="related-title">Other species in this genus</h3>
+                <ul style="list-style: square; padding-left: 1.5rem;">
+                    {% for rspecies in related %}
+                        {% if rspecies.id.toString() != species.id.toString() %}
+                            <li>
+                                <a href="{{ path('fauna_species_show', {id: rspecies.id.toString()}) }}">
+                                    {{ rspecies.name }} (<em>{{ rspecies.latin }}</em>)
+                                </a>
+                            </li>
+                        {% endif %}
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+    </article>
+</main>
+{% endblock %}

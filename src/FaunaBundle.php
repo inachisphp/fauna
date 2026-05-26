@@ -1,6 +1,11 @@
 <?php
 
-declare(strict_types=1);
+/**
+ * This file is part of the Fauna plugin for the Inachis framework
+ *
+ * @package Fauna
+ * @license https://github.com/inachisphp/plugin-fauna/blob/main/LICENSE.md
+ */
 
 namespace Inachis\Fauna;
 

@@ -1,0 +1,64 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ is_new ? 'Add Featured Species' : 'Edit Featured Entry' }} - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+        <a href="{{ path('fauna_featured_manage') }}">← Manage Featured</a>
+    </nav>
+
+    <h1>{{ is_new ? 'Add Featured Species' : 'Edit Featured Entry' }}</h1>
+
+    <div class="fauna-card">
+        {{ form_start(form) }}
+
+            <div class="fauna-form-group">
+                {{ form_label(form.title, 'Featured Title') }}
+                {{ form_widget(form.title, {'attr': {'autofocus': true}}) }}
+                {{ form_errors(form.title) }}
+            </div>
+
+            <div class="fauna-form-group">
+                {{ form_label(form.species, 'Species') }}
+                {{ form_widget(form.species) }}
+                {{ form_errors(form.species) }}
+                <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin-top: 0.25rem;">Select the species to feature on the homepage.</p>
+            </div>
+
+            <div class="fauna-form-group">
+                {{ form_label(form.imageLink, 'Image Source Link') }}
+                {{ form_widget(form.imageLink) }}
+                {{ form_errors(form.imageLink) }}
+                <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin-top: 0.25rem;">URL linking to the original image source/attribution page.</p>
+            </div>
+
+            <div class="fauna-form-group">
+                {{ form_label(form.description, 'Description') }}
+                {{ form_widget(form.description) }}
+                {{ form_errors(form.description) }}
+            </div>
+
+            <div class="fauna-form-group">
+                {{ form_label(form.scheduleDate, 'Schedule Date') }}
+                {{ form_widget(form.scheduleDate) }}
+                {{ form_errors(form.scheduleDate) }}
+                <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin-top: 0.25rem;">Leave blank to make available immediately when published.</p>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem; padding: 1rem; background: #1b271b; border-radius: 8px;">
+                {{ form_widget(form.isLive, {'attr': {'style': 'width: 1.25rem; height: 1.25rem; accent-color: var(--fauna-primary);'}}) }}
+                {{ form_label(form.isLive, 'Live (publish this featured entry)', {'label_attr': {'style': 'font-weight: 600; cursor: pointer; margin: 0;'}}) }}
+            </div>
+
+            <div style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+                <button type="submit" class="fauna-btn">{{ is_new ? 'Schedule Featured Entry' : 'Save Changes' }}</button>
+                <a href="{{ path('fauna_featured_manage') }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+            </div>
+
+        {{ form_end(form) }}
+    </div>
+</main>
+{% endblock %}

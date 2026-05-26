@@ -1,0 +1,111 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Sighting: {{ sighting.species.name }} - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<main class="fauna-container" id="maincontent">
+    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+        <a href="{{ path('fauna_lifelist') }}">← Lifelist</a>
+        {% if sighting.trip %}
+            / <a href="{{ path('fauna_trip_show', {id: sighting.trip.id.toString()}) }}">{{ sighting.trip.name }}</a>
+        {% endif %}
+    </nav>
+
+    {% for label, messages in app.flashes %}
+        {% for message in messages %}
+            <div class="fauna-alert fauna-alert-{{ label }}" role="alert">{{ message }}</div>
+        {% endfor %}
+    {% endfor %}
+
+    <article class="fauna-card" itemscope itemtype="https://schema.org/Observation">
+        <header>
+            <h1 itemprop="about" itemscope itemtype="https://schema.org/Taxon">
+                <span itemprop="name">{{ sighting.species.name }}</span>
+            </h1>
+            <p style="font-style: italic; color: var(--fauna-text-muted); margin-top: -0.5rem;">
+                {{ sighting.species.latin }}
+            </p>
+        </header>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 1.5rem 0;">
+            <div>
+                <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Count</p>
+                <p style="margin: 0; font-size: 1.5rem; font-weight: 700;">{{ sighting.count }}</p>
+            </div>
+            <div>
+                <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Date Recorded</p>
+                <p style="margin: 0; font-size: 1.25rem; font-weight: 600;" itemprop="temporalCoverage">
+                    <time datetime="{{ sighting.date|date('Y-m-d\\TH:i') }}">
+                        {{ sighting.date|date('d M Y \\a\\t H:i') }}
+                    </time>
+                </p>
+            </div>
+            {% if sighting.trip %}
+                <div>
+                    <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Trip</p>
+                    <p style="margin: 0;">
+                        <a href="{{ path('fauna_trip_show', {id: sighting.trip.id.toString()}) }}">{{ sighting.trip.name }}</a>
+                    </p>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if sighting.notes %}
+            <section aria-labelledby="notes-heading" style="margin-bottom: 1.5rem;">
+                <h2 id="notes-heading" style="font-size: 1rem; color: var(--fauna-text-muted);">Notes</h2>
+                <p>{{ sighting.notes|nl2br }}</p>
+            </section>
+        {% endif %}
+
+        <section aria-labelledby="location-heading" itemscope itemtype="https://schema.org/Place">
+            <h2 id="location-heading" style="font-size: 1.1rem;">Location Details</h2>
+            {% if sighting.location %}
+                <p><strong>Place:</strong> <span itemprop="name">{{ sighting.location }}</span></p>
+            {% endif %}
+            {% if sighting.country %}
+                <p><strong>Country:</strong> <span itemprop="addressCountry">{{ sighting.country.name }}</span></p>
+            {% endif %}
+            {% if sighting.latitude and sighting.longitude %}
+                <p class="geo" itemprop="geo" itemscope itemtype="https://schema.org/GeoCoordinates">
+                    <strong>Coordinates:</strong>
+                    <span itemprop="latitude">{{ sighting.latitude }}</span>,
+                    <span itemprop="longitude">{{ sighting.longitude }}</span>
+                </p>
+                <div id="map_canvas" class="fauna-map" aria-label="Map showing sighting location"></div>
+            {% endif %}
+        </section>
+
+        {% if app.user and app.user == sighting.user %}
+            <div style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+                <a href="{{ path('fauna_sighting_edit', {id: sighting.id.toString()}) }}" class="fauna-btn" role="button">Edit Sighting</a>
+                <form action="{{ path('fauna_sighting_delete', {id: sighting.id.toString()}) }}" method="post" onsubmit="return confirm('Delete this sighting? This cannot be undone.');">
+                    <input type="hidden" name="_token" value="{{ csrf_token('delete-sighting-' ~ sighting.id.toString()) }}">
+                    <button type="submit" class="fauna-btn fauna-btn-danger">Delete</button>
+                </form>
+            </div>
+        {% endif %}
+    </article>
+</main>
+
+{% if sighting.latitude and sighting.longitude %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const lat = {{ sighting.latitude }};
+    const lng = {{ sighting.longitude }};
+    const map = L.map('map_canvas').setView([lat, lng], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+    L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup('<strong>{{ sighting.species.name|e('js') }}</strong>')
+        .openPopup();
+});
+</script>
+{% endif %}
+{% endblock %}

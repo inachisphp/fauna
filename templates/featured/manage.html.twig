@@ -1,0 +1,70 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Manage Featured Species - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    {% for label, messages in app.flashes %}
+        {% for message in messages %}
+            <div class="fauna-alert fauna-alert-{{ label }}" role="alert">{{ message }}</div>
+        {% endfor %}
+    {% endfor %}
+
+    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+        <h1 style="margin: 0;">Manage Featured Species</h1>
+        <a href="{{ path('fauna_featured_new') }}" class="fauna-btn" role="button">Add Featured Entry</a>
+    </header>
+
+    {% if all_featured is not empty %}
+        <div class="fauna-card" style="padding: 0; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse;" aria-label="Featured species schedule">
+                <thead>
+                    <tr style="background: #1b271b; text-align: left;">
+                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Species</th>
+                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Scheduled</th>
+                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Status</th>
+                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for featured in all_featured %}
+                        <tr style="border-bottom: 1px solid var(--fauna-border);">
+                            <td style="padding: 1rem;">
+                                <strong>{{ featured.title }}</strong>
+                                {% if featured.species %}
+                                    <span style="color: var(--fauna-text-muted); font-size: 0.875rem; display: block; font-style: italic;">{{ featured.species.latin }}</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 1rem; color: var(--fauna-text-muted);">
+                                {% if featured.scheduleDate %}
+                                    <time datetime="{{ featured.scheduleDate|date('Y-m-d\\TH:i') }}">{{ featured.scheduleDate|date('d M Y H:i') }}</time>
+                                {% else %}
+                                    <em>Immediate</em>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 1rem;">
+                                {% if featured.isLive %}
+                                    <span style="display: inline-block; padding: 0.25rem 0.75rem; background: #1d3a1d; color: #d1ffd1; border-radius: 20px; font-size: 0.875rem; font-weight: 600;">Live</span>
+                                {% else %}
+                                    <span style="display: inline-block; padding: 0.25rem 0.75rem; background: #2b2b2b; color: var(--fauna-text-muted); border-radius: 20px; font-size: 0.875rem;">Draft</span>
+                                {% endif %}
+                            </td>
+                            <td style="padding: 1rem;">
+                                <a href="{{ path('fauna_featured_edit', {id: featured.id.toString()}) }}" class="fauna-btn" style="padding: 0.4rem 0.9rem; font-size: 0.875rem;">Edit</a>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <div class="fauna-card" style="text-align: center; padding: 3rem 1.5rem;">
+            <h2>No featured entries yet</h2>
+            <p style="color: var(--fauna-text-muted); margin-bottom: 1.5rem;">Schedule a species to appear on the homepage.</p>
+            <a href="{{ path('fauna_featured_new') }}" class="fauna-btn" role="button">Add First Entry</a>
+        </div>
+    {% endif %}
+</main>
+{% endblock %}

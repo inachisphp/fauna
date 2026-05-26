@@ -1,0 +1,79 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ taxonomy.type|capitalize }}: {{ taxonomy.name }} - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    {% if parent_path is not empty %}
+        <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+            <ol class="fauna-taxonomy-path" style="margin: 0;">
+                {% for ancestor in parent_path %}
+                    <li>
+                        <a class="fauna-tax-badge" href="{{ path('fauna_taxonomy_show', {id: ancestor.id.toString()}) }}">
+                            <strong>{{ ancestor.type }}</strong>: <em>{{ ancestor.name }}</em>
+                        </a>
+                    </li>
+                {% endfor %}
+            </ol>
+        </nav>
+    {% endif %}
+
+    <article class="fauna-card">
+        <header>
+            <h1>
+                <span style="color: var(--fauna-text-muted); font-size: 0.8em; font-weight: 400; display: block; text-transform: capitalize; margin-bottom: 0.25rem;">{{ taxonomy.type }}</span>
+                <em>{{ taxonomy.name }}</em>
+            </h1>
+            {% if taxonomy.common %}
+                <p style="font-size: 1.2rem; color: var(--fauna-text-muted); margin-top: -0.5rem;">{{ taxonomy.common }}</p>
+            {% endif %}
+        </header>
+
+        {% if children is not empty %}
+            <section aria-labelledby="subgroups-heading" style="margin-top: 1.5rem;">
+                <h2 id="subgroups-heading" style="font-size: 1.1rem;">Subgroups</h2>
+                <ul style="list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem;">
+                    {% for child in children %}
+                        <li>
+                            <a href="{{ path('fauna_taxonomy_show', {id: child.id.toString()}) }}"
+                               style="display: block; padding: 0.75rem 1rem; background: #1b271b; border: 1px solid var(--fauna-border); border-radius: 8px; text-decoration: none; transition: border-color 0.2s ease;"
+                               onmouseover="this.style.borderColor='var(--fauna-primary)'" onmouseout="this.style.borderColor='var(--fauna-border)'">
+                                {% if child.common %}
+                                    <strong style="display: block; color: #ffffff;">{{ child.common }}</strong>
+                                {% endif %}
+                                <em style="color: var(--fauna-text-muted); font-size: 0.9rem;">{{ child.name }}</em>
+                                <span style="display: block; font-size: 0.75rem; color: var(--fauna-text-muted); text-transform: capitalize; margin-top: 0.25rem;">{{ child.type }}</span>
+                            </a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+
+        {% if species is not empty %}
+            <section aria-labelledby="species-heading" style="margin-top: 1.5rem;">
+                <h2 id="species-heading" style="font-size: 1.1rem;">Species in this {{ taxonomy.type }}</h2>
+                <ul style="list-style: none; padding: 0;">
+                    {% for s in species %}
+                        <li style="padding: 0.5rem 0; border-bottom: 1px solid var(--fauna-border);">
+                            <a href="{{ path('fauna_species_show', {id: s.id.toString()}) }}" style="font-weight: 600;">
+                                {{ s.name }}
+                            </a>
+                            <em style="color: var(--fauna-text-muted); margin-left: 0.5rem;">{{ s.latin }}</em>
+                            {% if s.iucn %}
+                                <span class="fauna-iucn-badge" style="margin-left: 0.5rem;">{{ s.iucn }}</span>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            </section>
+        {% endif %}
+
+        {% if children is empty and species is empty %}
+            <p style="color: var(--fauna-text-muted); font-style: italic;">No subgroups or species found in this taxonomic group.</p>
+        {% endif %}
+    </article>
+</main>
+{% endblock %}

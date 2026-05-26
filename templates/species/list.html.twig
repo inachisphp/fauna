@@ -1,0 +1,43 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}All Species - Fauna{% endblock %}
+
+{% block body %}
+{% include '@Fauna/_styles.html.twig' %}
+
+<main class="fauna-container" id="maincontent">
+    <h1>All Species</h1>
+
+    <div class="fauna-card">
+        <form action="{{ path('fauna_species_search') }}" method="get" class="nice_form" aria-label="Species Search">
+            <div class="fauna-form-group">
+                <label for="species_search_q">Search Species</label>
+                <input type="text" name="q" id="species_search_q" placeholder="Enter common or scientific name..." required />
+            </div>
+            <button type="submit" class="fauna-btn">Search</button>
+        </form>
+    </div>
+
+    {% if species_list is defined and species_list is not empty %}
+        <ul style="list-style: none; padding: 0;">
+            {% for species in species_list %}
+                <li class="fauna-card">
+                    <h2>
+                        <a href="{{ path('fauna_species_show', {id: species.id.toString()}) }}">
+                            {{ species.name }} (<em>{{ species.latin }}</em>)
+                        </a>
+                    </h2>
+                    {% if species.iucn %}
+                        <span class="fauna-iucn-badge">IUCN: {{ species.iucn }}</span>
+                    {% endif %}
+                    {% if species.description %}
+                        <p>{{ species.description|slice(0, 150) }}...</p>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No species currently registered. Use console command to seed default species.</p>
+    {% endif %}
+</main>
+{% endblock %}
