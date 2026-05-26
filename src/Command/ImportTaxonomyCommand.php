@@ -10,12 +10,14 @@
 namespace Inachis\Fauna\Command;
 
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Inachis\Fauna\Entity\Country;
 use Inachis\Fauna\Entity\Species;
 use Inachis\Fauna\Entity\Taxonomy;
 use Inachis\Fauna\Enum\IucnStatus;
 use Inachis\Fauna\Enum\TaxonomyType;
+use Ramsey\Uuid\Uuid;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Helper\ProgressBar;
@@ -31,40 +33,15 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 class ImportTaxonomyCommand extends Command
 {
-    private const BATCH_SIZE = 500;
+    private const BATCH_SIZE = 20;
 
-    /**
-     * Cached taxonomy entities
-     *
-     * @var array<string, Taxonomy>
-     */
-    private array $taxonomyCache = [];
+    private array $taxonomyIdCache = [];
+    private array $pendingTaxonomyCache = [];
+    private array $countryIdCache = [];
 
-    /**
-     * Cached countries
-     *
-     * @var array<string, Country>
-     */
-    private array $countryCache = [];
+    private array $recentMalformedRows = [];
 
-    /**
-     * Cached species IDs by external ID
-     *
-     * @var array<int, Species>
-     */
-    private array $speciesCache = [];
-
-    /**
-     * Accepted taxonomy hierarchy
-     */
-    private const TAXONOMIC_LEVELS = [
-        'kingdom' => TaxonomyType::KINGDOM,
-        'phylum' => TaxonomyType::PHYLUM,
-        'class' => TaxonomyType::CLASS_,
-        'order' => TaxonomyType::ORDER,
-        'family' => TaxonomyType::FAMILY,
-        'genus' => TaxonomyType::GENUS,
-    ];
+    private int $flushCount = 0;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -78,46 +55,81 @@ class ImportTaxonomyCommand extends Command
         $this
             ->addArgument(
                 'directory',
-                InputArgument::REQUIRED,
-                'Directory containing Taxon.tsv, VernacularName.tsv and Distribution.tsv'
+                InputArgument::REQUIRED
             )
             ->addOption(
                 'dry-run',
                 null,
-                InputOption::VALUE_NONE,
-                'Perform import without writing to database'
+                InputOption::VALUE_NONE
             )
             ->addOption(
                 'clear',
                 null,
+                InputOption::VALUE_NONE
+            )
+            
+            ->addOption(
+                'import-taxonomy',
+                'taxa',
                 InputOption::VALUE_NONE,
-                'Clear fauna taxonomy/species tables before import'
-            );
+                'Import Taxon.tsv'
+            )
+            ->addOption(
+                'import-vernacular',
+                'vern',
+                InputOption::VALUE_NONE,
+                'Import VernacularName.tsv'
+            )
+            ->addOption(
+                'import-distribution',
+                'dist',
+                InputOption::VALUE_NONE,
+                'Import Distribution.tsv'
+            );;
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output): int
-    {
+    protected function execute(
+        InputInterface $input,
+        OutputInterface $output
+    ): int {
+        ini_set('memory_limit', '1024M');
+
+        gc_enable();
+
+        /*
+         * CRITICAL:
+         * Prevent Doctrine DBAL middleware
+         * memory accumulation.
+         */
+        $this->connection
+            ->getConfiguration()
+            ->setMiddlewares([]);
+
         $io = new SymfonyStyle($input, $output);
 
-        $directory = rtrim((string) $input->getArgument('directory'), DIRECTORY_SEPARATOR);
+        $directory = rtrim(
+            (string) $input->getArgument('directory'),
+            DIRECTORY_SEPARATOR
+        );
+
         $dryRun = (bool) $input->getOption('dry-run');
         $clear = (bool) $input->getOption('clear');
 
-        $taxonFile = $directory . DIRECTORY_SEPARATOR . 'Taxon.tsv';
-        $vernacularFile = $directory . DIRECTORY_SEPARATOR . 'VernacularName.tsv';
-        $distributionFile = $directory . DIRECTORY_SEPARATOR . 'Distribution.tsv';
+        $importTaxa = (bool) $input->getOption('taxa');
+        $importVernacular = (bool) $input->getOption('vernacular');
+        $importDistribution = (bool) $input->getOption('distribution');
 
-        foreach ([$taxonFile, $vernacularFile, $distributionFile] as $file) {
-            if (!is_file($file)) {
-                $io->error(sprintf('Missing required file: %s', $file));
-                return Command::FAILURE;
-            }
-        }
-
-        $io->title('Fauna Taxonomy Import');
-
-        if ($dryRun) {
-            $io->warning('Running in DRY RUN mode - no data will be persisted');
+         /*
+         * If no specific import options are provided, import all.
+         */
+        if (
+            !$importTaxa
+            && !$importVernacular
+            && !$importDistribution
+        ) {
+            $importTaxa = true;
+            $importVernacular = true;
+            $importDistribution = true;
         }
 
         if ($clear) {
@@ -125,58 +137,78 @@ class ImportTaxonomyCommand extends Command
         }
 
         $stats = [
+            'processed' => 0,
+            'skipped' => 0,
+            'duplicates_skipped' => 0,
+            'malformed_rows' => 0,
             'species_created' => 0,
             'taxonomy_created' => 0,
-            'vernacular_added' => 0,
-            'countries_added' => 0,
-            'rows_processed' => 0,
-            'rows_skipped' => 0,
+            'vernacular_updated' => 0,
+            'distribution_updated' => 0,
         ];
 
-        $this->warmCaches();
+        if ($importTaxa) {
+            $io->section('Importing Taxon.tsv');
 
-        $io->section('Importing Taxon.tsv');
-        $this->importTaxa(
-            $taxonFile,
-            $stats,
-            $dryRun,
-            $output
-        );
-
-        $io->section('Importing VernacularName.tsv');
-        $this->importVernacularNames(
-            $vernacularFile,
-            $stats,
-            $dryRun,
-            $output
-        );
-
-        $io->section('Importing Distribution.tsv');
-        $this->importDistribution(
-            $distributionFile,
-            $stats,
-            $dryRun,
-            $output
-        );
-
-        if (!$dryRun) {
-            $this->entityManager->flush();
-            $this->entityManager->clear();
+            $this->importTaxa(
+                $directory . '/Taxon.tsv',
+                $stats,
+                $dryRun,
+                $output
+            );
         }
 
+        if ($importVernacular) {
+            $io->section('Importing VernacularName.tsv');
+
+            $this->importVernacular(
+                $directory . '/VernacularName.tsv',
+                $stats,
+                $dryRun,
+                $output
+            );
+        }
+
+        if ($importDistribution) {
+            $io->section('Importing Distribution.tsv');
+
+            $this->importDistribution(
+                $directory . '/Distribution.tsv',
+                $stats,
+                $dryRun,
+                $output
+            );
+        }
         $io->success('Import complete');
 
         $io->table(
-            ['Metric', 'Value'],
+            ['Metric', 'Count'],
             [
-                ['Rows processed', number_format($stats['rows_processed'])],
-                ['Rows skipped', number_format($stats['rows_skipped'])],
-                ['Species created', number_format($stats['species_created'])],
-                ['Taxonomy created', number_format($stats['taxonomy_created'])],
-                ['Vernacular names added', number_format($stats['vernacular_added'])],
-                ['Country associations added', number_format($stats['countries_added'])],
+                ['Processed', number_format($stats['processed'])],
+                ['Skipped', number_format($stats['skipped'])],
+                ['Species Created', number_format($stats['species_created'])],
+                ['Taxonomy Created', number_format($stats['taxonomy_created'])],
+                ['Vernacular Updated', number_format($stats['vernacular_updated'])],
+                ['Distribution Updated', number_format($stats['distribution_updated'])],
+                ['Malformed Rows', number_format($stats['malformed_rows'])],
+                ['Duplicates', number_format($stats['duplicates_skipped'])],
             ]
         );
+
+        if ($this->recentMalformedRows !== []) {
+            $output->writeln('');
+            $output->writeln('<comment>Recent malformed rows:</comment>');
+
+            foreach ($this->recentMalformedRows as $row) {
+                $output->writeln(sprintf(
+                    'Line %d | expected=%d actual=%d | %s',
+                    $row['line'],
+                    $row['expected_columns'],
+                    $row['actual_columns'],
+                    $row['preview']
+                ));
+            }
+        }
 
         return Command::SUCCESS;
     }
@@ -190,42 +222,74 @@ class ImportTaxonomyCommand extends Command
         $handle = fopen($file, 'rb');
 
         if ($handle === false) {
-            throw new \RuntimeException(sprintf('Unable to open %s', $file));
+            throw new \RuntimeException('Cannot open Taxon.tsv');
         }
 
-        $headers = fgetcsv($handle, 0, "\t");
+        $headers = fgetcsv($handle, 0, "\t", '"', '\\');
 
         if ($headers === false) {
-            fclose($handle);
-            throw new \RuntimeException('Invalid TSV header');
+            throw new \RuntimeException('Invalid TSV');
         }
 
         $headers = array_map('trim', $headers);
 
-        $progressBar = new ProgressBar($output);
-        $progressBar->start();
+        $progress = new ProgressBar($output);
 
-        $batchCount = 0;
+        $progress->start();
 
-        while (($row = fgetcsv($handle, 0, "\t")) !== false) {
-            ++$stats['rows_processed'];
-            $progressBar->advance();
+        $batch = 0;
+        $lineNumber = 1; // Start at 1 to account for header
+
+        while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
+            ++$stats['processed'];
+            ++$lineNumber;
+
+            $progress->advance();
+
+            $headerCount = count($headers);
+            $rowCount = count($row);
+
+            /*
+            * Skip malformed rows safely.
+            */
+            if ($rowCount !== $headerCount) {
+                ++$stats['malformed_rows'];
+                $this->recordMalformedRow(
+                    $lineNumber,
+                    $headerCount,
+                    $rowCount,
+                    $row
+                );
+                continue;
+            }
 
             $data = array_combine($headers, $row);
-
             if ($data === false) {
-                ++$stats['rows_skipped'];
+                ++$stats['skipped'];
                 continue;
             }
 
             if (!$this->shouldImportTaxon($data)) {
-                ++$stats['rows_skipped'];
+                ++$stats['skipped'];
+                continue;
+            }
+            if ($this->speciesExists($data['canonicalName'])) {
+                $stats['duplicates_skipped']++;
                 continue;
             }
 
             $parent = null;
 
-            foreach (self::TAXONOMIC_LEVELS as $column => $type) {
+            $levels = [
+                'kingdom' => TaxonomyType::KINGDOM,
+                'phylum' => TaxonomyType::PHYLUM,
+                'class' => TaxonomyType::CLASS_,
+                'order' => TaxonomyType::ORDER,
+                'family' => TaxonomyType::FAMILY,
+                'genus' => TaxonomyType::GENUS,
+            ];
+
+            foreach ($levels as $column => $type) {
                 $value = trim((string) ($data[$column] ?? ''));
 
                 if ($value === '') {
@@ -233,125 +297,154 @@ class ImportTaxonomyCommand extends Command
                 }
 
                 $parent = $this->getOrCreateTaxonomy(
-                    name: $value,
-                    type: $type,
-                    parent: $parent,
-                    dryRun: $dryRun,
-                    stats: $stats
+                    $value,
+                    $type,
+                    $parent,
+                    $dryRun,
+                    $stats
                 );
             }
 
             $species = new Species(
                 name: '',
                 latin: trim((string) $data['canonicalName']),
-                iucn: IucnStatus::tryFromValue($data['threatStatus'] ?? null),
+                iucn: IucnStatus::tryFromValue(
+                    $data['threatStatus'] ?? null
+                ),
                 genus: $parent
             );
 
             $species->setExternalId(
-                isset($data['taxonID']) ? (int) $data['taxonID'] : null
+                isset($data['taxonID'])
+                    ? (int) $data['taxonID']
+                    : null
             );
 
             if (!$dryRun) {
                 $this->entityManager->persist($species);
             }
 
-            $externalId = (int) ($data['taxonID'] ?? 0);
-
-            if ($externalId > 0) {
-                $this->speciesCache[$externalId] = $species;
-            }
-
             ++$stats['species_created'];
-            ++$batchCount;
+            ++$batch;
 
-            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
-                $this->flushAndClear();
-                $batchCount = 0;
+            if ($batch >= self::BATCH_SIZE) {
+                if (!$dryRun) {
+                    $this->flushAndClear();
+                }
+
+                $batch = 0;
             }
+        }
+
+        if (!$dryRun) {
+            $this->flushAndClear();
         }
 
         fclose($handle);
 
-        if (!$dryRun) {
-            $this->entityManager->flush();
-        }
+        $progress->finish();
 
-        $progressBar->finish();
         $output->writeln('');
     }
 
-    private function importVernacularNames(
+    private function importVernacular(
         string $file,
         array &$stats,
         bool $dryRun,
         OutputInterface $output
     ): void {
+        if (!is_file($file)) {
+            return;
+        }
+
         $handle = fopen($file, 'rb');
 
         if ($handle === false) {
-            throw new \RuntimeException(sprintf('Unable to open %s', $file));
+            return;
         }
 
-        $headers = fgetcsv($handle, 0, "\t");
+        $headers = fgetcsv($handle, 0, "\t", '"', '\\');
 
         if ($headers === false) {
             fclose($handle);
-            throw new \RuntimeException('Invalid TSV header');
+            return;
         }
 
         $headers = array_map('trim', $headers);
 
-        $progressBar = new ProgressBar($output);
-        $progressBar->start();
+        $progress = new ProgressBar($output);
 
-        $batchCount = 0;
+        $progress->start();
 
-        while (($row = fgetcsv($handle, 0, "\t")) !== false) {
-            $progressBar->advance();
+        $batch = 0;
+
+        while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
+            ++$stats['processed'];
+
+            $progress->advance();
+
+            if (count($row) !== count($headers)) {
+                ++$stats['malformed_rows'];
+                // $this->recordMalformedRow($row);
+                continue;
+            }
 
             $data = array_combine($headers, $row);
 
             if ($data === false) {
+                ++$stats['malformed_rows'];
                 continue;
             }
 
-            $taxonId = (int) ($data['taxonID'] ?? 0);
+            $taxonId = isset($data['taxonID'])
+                ? (int) $data['taxonID']
+                : null;
 
-            if ($taxonId === 0 || !isset($this->speciesCache[$taxonId])) {
+            $vernacular = trim(
+                (string) ($data['vernacularName'] ?? '')
+            );
+
+            if ($taxonId === null || $vernacular === '') {
+                ++$stats['skipped'];
                 continue;
             }
 
-            $vernacular = trim((string) ($data['vernacularName'] ?? ''));
+            $speciesId = $this->getSpeciesIdByExternalId($taxonId);
 
-            if ($vernacular === '') {
+            if ($speciesId === null) {
+                ++$stats['skipped'];
                 continue;
             }
 
-            $species = $this->speciesCache[$taxonId];
+            $species = $this->entityManager->getReference(
+                Species::class,
+                Uuid::fromString($speciesId)
+            );
 
-            if ($species->getName() === '') {
+            if (method_exists($species, 'setName')) {
                 $species->setName($vernacular);
-                ++$stats['vernacular_added'];
             }
 
-            ++$batchCount;
+            ++$stats['vernacular_updated'];
+            ++$batch;
 
-            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
-                $this->entityManager->flush();
-                $this->entityManager->clear();
+            if ($batch >= self::BATCH_SIZE) {
+                if (!$dryRun) {
+                    $this->flushAndClear();
+                }
 
-                $batchCount = 0;
+                $batch = 0;
             }
+        }
+
+        if (!$dryRun) {
+            $this->flushAndClear();
         }
 
         fclose($handle);
 
-        if (!$dryRun) {
-            $this->entityManager->flush();
-        }
+        $progress->finish();
 
-        $progressBar->finish();
         $output->writeln('');
     }
 
@@ -361,99 +454,111 @@ class ImportTaxonomyCommand extends Command
         bool $dryRun,
         OutputInterface $output
     ): void {
+        if (!is_file($file)) {
+            return;
+        }
+
         $handle = fopen($file, 'rb');
 
         if ($handle === false) {
-            throw new \RuntimeException(sprintf('Unable to open %s', $file));
+            return;
         }
 
-        $headers = fgetcsv($handle, 0, "\t");
+        $headers = fgetcsv($handle, 0, "\t", '"', '\\');
 
         if ($headers === false) {
             fclose($handle);
-            throw new \RuntimeException('Invalid TSV header');
+            return;
         }
 
         $headers = array_map('trim', $headers);
 
-        $progressBar = new ProgressBar($output);
-        $progressBar->start();
+        $progress = new ProgressBar($output);
 
-        $batchCount = 0;
+        $progress->start();
 
-        while (($row = fgetcsv($handle, 0, "\t")) !== false) {
-            $progressBar->advance();
+        $batch = 0;
+
+        while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
+            ++$stats['processed'];
+
+            $progress->advance();
+
+            if (count($row) !== count($headers)) {
+                ++$stats['malformed_rows'];
+                // $this->recordMalformedRow($row);
+                continue;
+            }
 
             $data = array_combine($headers, $row);
 
             if ($data === false) {
+                ++$stats['malformed_rows'];
                 continue;
             }
 
-            $taxonId = (int) ($data['taxonID'] ?? 0);
-            $countryCode = strtoupper(trim((string) ($data['countryCode'] ?? '')));
+            $taxonId = isset($data['taxonID'])
+                ? (int) $data['taxonID']
+                : null;
 
-            if (
-                $taxonId === 0 ||
-                $countryCode === '' ||
-                !isset($this->speciesCache[$taxonId])
-            ) {
+            $countryCode = trim(
+                (string) ($data['countryCode'] ?? '')
+            );
+
+            if ($taxonId === null || $countryCode === '') {
+                ++$stats['skipped'];
                 continue;
             }
 
-            $species = $this->speciesCache[$taxonId];
-            $country = $this->getCountryByCode($countryCode);
+            $speciesId = $this->getSpeciesIdByExternalId($taxonId);
 
-            if ($country === null) {
+            if ($speciesId === null) {
+                ++$stats['skipped'];
                 continue;
             }
 
-            $species->addCountry($country);
+            $countryId = $this->getCountryIdByCode($countryCode);
 
-            ++$stats['countries_added'];
-            ++$batchCount;
-
-            if (!$dryRun && $batchCount >= self::BATCH_SIZE) {
-                $this->entityManager->flush();
-                $this->entityManager->clear();
-
-                $batchCount = 0;
+            if ($countryId === null) {
+                ++$stats['skipped'];
+                continue;
             }
+
+            if (!$dryRun) {
+                try {
+                    $this->connection->insert(
+                        'fauna_species_to_country',
+                        [
+                            'species_id' => $speciesId,
+                            'country_id' => $countryId,
+                        ]
+                    );
+                } catch (UniqueConstraintViolationException) {
+                    ++$stats['duplicates_skipped'];
+                }
+            }
+
+            ++$stats['distribution_updated'];
+            ++$batch;
+
+            if ($batch >= self::BATCH_SIZE) {
+                if (!$dryRun) {
+                    $this->flushAndClear();
+                }
+
+                $batch = 0;
+            }
+        }
+
+        if (!$dryRun) {
+            $this->flushAndClear();
         }
 
         fclose($handle);
 
-        if (!$dryRun) {
-            $this->entityManager->flush();
-        }
+        $progress->finish();
 
-        $progressBar->finish();
         $output->writeln('');
-    }
-
-    private function shouldImportTaxon(array $data): bool
-    {
-        if (($data['taxonomicStatus'] ?? '') !== 'accepted') {
-            return false;
-        }
-
-        if (($data['kingdom'] ?? '') !== 'Animalia') {
-            return false;
-        }
-
-        $canonicalName = trim((string) ($data['canonicalName'] ?? ''));
-
-        if ($canonicalName === '') {
-            return false;
-        }
-
-        $taxonRank = strtolower(trim((string) ($data['taxonRank'] ?? '')));
-
-        return in_array(
-            $taxonRank,
-            ['species', 'subspecies'],
-            true
-        );
     }
 
     private function getOrCreateTaxonomy(
@@ -463,28 +568,54 @@ class ImportTaxonomyCommand extends Command
         bool $dryRun,
         array &$stats
     ): Taxonomy {
+        $parentId = $parent?->getId()?->toString();
+
         $cacheKey = sprintf(
             '%s|%s|%s',
             $type->value,
             strtolower($name),
-            $parent?->getName() ?? 'root'
+            $parentId ?? 'root'
         );
 
-        if (isset($this->taxonomyCache[$cacheKey])) {
-            return $this->taxonomyCache[$cacheKey];
+        if (isset($this->pendingTaxonomyCache[$cacheKey])) {
+            return $this->pendingTaxonomyCache[$cacheKey];
         }
 
-        $taxonomy = $this->entityManager
-            ->getRepository(Taxonomy::class)
-            ->findOneBy([
-                'name' => $name,
-                'type' => $type,
-                'parent' => $parent,
-            ]);
+        if (isset($this->taxonomyIdCache[$cacheKey])) {
+            return $this->entityManager->getReference(
+                Taxonomy::class,
+                Uuid::fromString(
+                    $this->taxonomyIdCache[$cacheKey]
+                )
+            );
+        }
 
-        if ($taxonomy instanceof Taxonomy) {
-            $this->taxonomyCache[$cacheKey] = $taxonomy;
-            return $taxonomy;
+        $existingId = $this->connection->fetchOne(
+            '
+            SELECT id
+            FROM fauna_taxonomy
+            WHERE name = :name
+            AND type = :type
+            AND (
+                (:parent IS NULL AND parent_id IS NULL)
+                OR parent_id = :parent
+            )
+            LIMIT 1
+            ',
+            [
+                'name' => $name,
+                'type' => $type->value,
+                'parent' => $parentId,
+            ]
+        );
+
+        if ($existingId !== false) {
+            $this->taxonomyIdCache[$cacheKey] = $existingId;
+
+            return $this->entityManager->getReference(
+                Taxonomy::class,
+                Uuid::fromString($existingId)
+            );
         }
 
         $taxonomy = new Taxonomy(
@@ -500,35 +631,76 @@ class ImportTaxonomyCommand extends Command
             $this->entityManager->persist($taxonomy);
         }
 
-        ++$stats['taxonomy_created'];
+        $this->pendingTaxonomyCache[$cacheKey] = $taxonomy;
 
-        $this->taxonomyCache[$cacheKey] = $taxonomy;
+        ++$stats['taxonomy_created'];
 
         return $taxonomy;
     }
 
-    private function getCountryByCode(string $code): ?Country
+    private function flushAndClear(): void
     {
-        if (isset($this->countryCache[$code])) {
-            return $this->countryCache[$code];
+        $this->entityManager->flush();
+
+        foreach ($this->pendingTaxonomyCache as $key => $taxonomy) {
+            $id = $taxonomy->getId()?->toString();
+
+            if ($id !== null) {
+                $this->taxonomyIdCache[$key] = $id;
+            }
         }
 
-        $country = $this->entityManager
-            ->getRepository(Country::class)
-            ->findOneBy([
-                'code' => $code,
-            ]);
+        $this->pendingTaxonomyCache = [];
 
-        if ($country instanceof Country) {
-            $this->countryCache[$code] = $country;
+        $this->entityManager->clear();
+
+        ++$this->flushCount;
+
+        /*
+         * Prevent cache explosion.
+         */
+        if ($this->flushCount % 100 === 0) {
+            $this->taxonomyIdCache = [];
+            $this->countryIdCache = [];
         }
 
-        return $country;
+        gc_collect_cycles();
     }
 
-    private function clearTables(SymfonyStyle $io, bool $dryRun): void
+    private function shouldImportTaxon(array $data): bool
     {
-        $io->warning('Clearing fauna tables');
+        if (($data['taxonomicStatus'] ?? '') !== 'accepted') {
+            return false;
+        }
+
+        if (($data['kingdom'] ?? '') !== 'Animalia') {
+            return false;
+        }
+
+        $canonicalName = trim(
+            (string) ($data['canonicalName'] ?? '')
+        );
+
+        if ($canonicalName === '') {
+            return false;
+        }
+
+        $rank = strtolower(
+            trim((string) ($data['taxonRank'] ?? ''))
+        );
+
+        return in_array(
+            $rank,
+            ['species', 'subspecies'],
+            true
+        );
+    }
+
+    private function clearTables(
+        SymfonyStyle $io,
+        bool $dryRun
+    ): void {
+        $io->warning('Clearing existing fauna tables');
 
         if ($dryRun) {
             return;
@@ -547,22 +719,43 @@ class ImportTaxonomyCommand extends Command
         );
     }
 
-    private function warmCaches(): void
+    private function speciesExists(string $latinName): bool
     {
-        foreach (
-            $this->entityManager
-                ->getRepository(Country::class)
-                ->findAll() as $country
-        ) {
-            $this->countryCache[$country->getCode()] = $country;
-        }
+        return (bool) $this->connection->fetchOne(
+            '
+            SELECT 1
+            FROM fauna_species
+            WHERE latin = :name
+            LIMIT 1
+            ',
+            [
+                'name' => $latinName,
+            ]
+        );
     }
 
-    private function flushAndClear(): void
-    {
-        $this->entityManager->flush();
-        $this->entityManager->clear();
+    private function recordMalformedRow(
+        int $line,
+        int $expected,
+        int $actual,
+        array $row
+    ): void {
+        $this->recentMalformedRows[] = [
+            'line' => $line,
+            'expected_columns' => $expected,
+            'actual_columns' => $actual,
+            'preview' => mb_substr(
+                json_encode($row, JSON_UNESCAPED_UNICODE) ?: '',
+                0,
+                500
+            ),
+        ];
 
-        gc_collect_cycles();
+        /*
+        * Keep memory bounded.
+        */
+        if (count($this->recentMalformedRows) > 100) {
+            array_shift($this->recentMalformedRows);
+        }
     }
 }

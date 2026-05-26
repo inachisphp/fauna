@@ -19,6 +19,8 @@ use Ramsey\Uuid\UuidInterface;
 
 #[ORM\Entity(repositoryClass: 'Inachis\Fauna\Repository\SpeciesRepository')]
 #[ORM\Table(name: 'fauna_species')]
+#[ORM\Index(columns: ['external_id'])]
+#[ORM\Index(columns: ['latin'])]
 class Species
 {
     /**

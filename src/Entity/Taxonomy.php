@@ -21,6 +21,8 @@ use Ramsey\Uuid\UuidInterface;
 #[ORM\Index(columns: ['external_id'])]
 #[ORM\Index(columns: ['parent_id'])]
 #[ORM\Index(columns: ['type'])]
+#[ORM\Index(columns: ['name', 'type'])]
+#[ORM\Index(columns: ['canonical_name'])]
 class Taxonomy
 {
     /**
