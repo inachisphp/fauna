@@ -32,7 +32,18 @@ class TaxonomyController extends AbstractController
         }
 
         // Get sub-groups (children)
-        $children = $taxonomy->getChildren();
+        $children = $taxonomy->getChildren()->toArray();
+
+        usort($children, function ($a, $b) {
+            $typeComparison = $a->getType()->sortOrder()
+                <=> $b->getType()->sortOrder();
+
+            if ($typeComparison !== 0) {
+                return $typeComparison;
+            }
+
+            return strcmp($a->getName(), $b->getName());
+        });
 
         // Get species directly in this taxonomic node (e.g., if it is a Genus)
         $speciesRepo = $this->em->getRepository(Species::class);

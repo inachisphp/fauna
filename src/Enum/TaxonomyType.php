@@ -47,4 +47,20 @@ enum TaxonomyType: string
 
         return self::tryFrom(strtolower(trim($value)));
     }
+
+    /**
+     * Returns the sort order for taxonomy hierarchy
+     */
+    public function sortOrder(): int
+    {
+        return match ($this) {
+            self::DOMAIN => 0,
+            self::KINGDOM => 1,
+            self::PHYLUM => 2,
+            self::CLASS_ => 3,
+            self::ORDER => 4,
+            self::FAMILY => 5,
+            self::GENUS => 6,
+        };
+    }
 }
