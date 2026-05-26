@@ -107,7 +107,7 @@ class Taxonomy
      * @param string|null $common
      * @param Taxonomy|null $parent
      */
-    public function __construct(string $name = '', TaxonomyType $type = null, ?string $common = null, ?Taxonomy $parent = null)
+    public function __construct(string $name = '', ?TaxonomyType $type = null, ?string $common = null, ?Taxonomy $parent = null)
     {
         $this->name = $name;
         $this->type = is_string($type) ? TaxonomyType::fromValue($type) : $type;
@@ -197,7 +197,7 @@ class Taxonomy
      * @return self
      */
     public function setCommon(?string $common): self
-        {
+    {
         $this->common = $common;
         return $this;
     }
