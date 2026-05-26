@@ -4,9 +4,5 @@ services:
         autoconfigure: true
 
     Inachis\Fauna\:
-        resource: '../../'
-        exclude:
-            - '../../DependencyInjection/'
-            - '../../Entity/'
-            - '../../Resources/'
+        resource: '../../{Command,Entity,Repository,Service}'
 

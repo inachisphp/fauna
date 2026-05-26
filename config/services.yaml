@@ -5,11 +5,7 @@ services:
         public: false
 
     Inachis\Fauna\:
-        resource: '../src/'
-        exclude:
-            - '../src/DependencyInjection/'
-            - '../src/Entity/'
-            - '../src/FaunaBundle.php'
+        resource: '../src/{Command,Entity,Repository,Service}'
 
     Inachis\Fauna\Controller\:
         resource: '../src/Controller/'
