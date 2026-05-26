@@ -9,6 +9,7 @@
 
 namespace Inachis\Fauna\Command;
 
+use SplFileObject;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -70,22 +71,22 @@ class ImportTaxonomyCommand extends Command
             
             ->addOption(
                 'import-taxonomy',
-                'taxa',
+                null,
                 InputOption::VALUE_NONE,
                 'Import Taxon.tsv'
             )
             ->addOption(
                 'import-vernacular',
-                'vern',
+                null,
                 InputOption::VALUE_NONE,
                 'Import VernacularName.tsv'
             )
             ->addOption(
                 'import-distribution',
-                'dist',
+                null,
                 InputOption::VALUE_NONE,
                 'Import Distribution.tsv'
-            );;
+            );
     }
 
     protected function execute(
@@ -115,9 +116,9 @@ class ImportTaxonomyCommand extends Command
         $dryRun = (bool) $input->getOption('dry-run');
         $clear = (bool) $input->getOption('clear');
 
-        $importTaxa = (bool) $input->getOption('taxa');
-        $importVernacular = (bool) $input->getOption('vernacular');
-        $importDistribution = (bool) $input->getOption('distribution');
+        $importTaxa = (bool) $input->getOption('import-taxonomy');
+        $importVernacular = (bool) $input->getOption('import-vernacular');
+        $importDistribution = (bool) $input->getOption('import-distribution');
 
          /*
          * If no specific import options are provided, import all.
@@ -148,7 +149,7 @@ class ImportTaxonomyCommand extends Command
         ];
 
         if ($importTaxa) {
-            $io->section('Importing Taxon.tsv');
+            $io->section(sprintf('Importing Taxon.tsv (%d lines)', $this->countLines($directory . '/Taxon.tsv')));
 
             $this->importTaxa(
                 $directory . '/Taxon.tsv',
@@ -159,7 +160,7 @@ class ImportTaxonomyCommand extends Command
         }
 
         if ($importVernacular) {
-            $io->section('Importing VernacularName.tsv');
+            $io->section(sprintf('Importing VernacularName.tsv (%d lines)', $this->countLines($directory . '/VernacularName.tsv')));
 
             $this->importVernacular(
                 $directory . '/VernacularName.tsv',
@@ -170,7 +171,7 @@ class ImportTaxonomyCommand extends Command
         }
 
         if ($importDistribution) {
-            $io->section('Importing Distribution.tsv');
+            $io->section(sprintf('Importing Distribution.tsv (%d lines)', $this->countLines($directory . '/Distribution.tsv')));
 
             $this->importDistribution(
                 $directory . '/Distribution.tsv',
@@ -732,6 +733,43 @@ class ImportTaxonomyCommand extends Command
                 'name' => $latinName,
             ]
         );
+    }
+
+    private function getSpeciesIdByExternalId(int $externalId): ?string
+    {
+        static $cache = [];
+
+        if (isset($cache[$externalId])) {
+            return $cache[$externalId];
+        }
+
+        $id = $this->connection->fetchOne(
+            '
+            SELECT id
+            FROM fauna_species
+            WHERE external_id = :external_id
+            LIMIT 1
+            ',
+            [
+                'external_id' => $externalId,
+            ]
+        );
+
+        if (!$id) {
+            return null;
+        }
+
+        return $cache[$externalId] = $id;
+    }
+
+    private function countLines(string $file): int
+    {
+        $spl = new SplFileObject($file, 'rb');
+
+        $spl->seek(PHP_INT_MAX);
+
+        // line numbers are 0-based, so add 1
+        return $spl->key() + 1;
     }
 
     private function recordMalformedRow(
