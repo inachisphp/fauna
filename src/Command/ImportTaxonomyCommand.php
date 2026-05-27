@@ -124,6 +124,12 @@ class ImportTaxonomyCommand extends Command
                 null,
                 InputOption::VALUE_NONE,
                 'Import Distribution.tsv'
+            )
+            ->addOption(
+                'import-description',
+                null,
+                InputOption::VALUE_NONE,
+                'Import Description.tsv'
             );
     }
 
@@ -161,6 +167,7 @@ class ImportTaxonomyCommand extends Command
         $importTaxa = (bool) $input->getOption('import-taxonomy');
         $importVernacular = (bool) $input->getOption('import-vernacular');
         $importDistribution = (bool) $input->getOption('import-distribution');
+        $importDescription = (bool) $input->getOption('import-description');
 
         // If no specific import options are provided, import all.
         if (
@@ -168,10 +175,12 @@ class ImportTaxonomyCommand extends Command
             && !$importTaxa
             && !$importVernacular
             && !$importDistribution
+            && !$importDescription
         ) {
             $importTaxa = true;
             $importVernacular = true;
             $importDistribution = true;
+            $importDescription = true;
         }
 
         if ($clear) {
@@ -187,6 +196,7 @@ class ImportTaxonomyCommand extends Command
             'taxonomy_created' => 0,
             'vernacular_updated' => 0,
             'distribution_updated' => 0,
+            'description_updated' => 0,
         ];
 
         if ($patchIds) {
@@ -229,6 +239,18 @@ class ImportTaxonomyCommand extends Command
                 $output
             );
         }
+
+        if ($importDescription) {
+            $io->section(sprintf('Importing Description.tsv (%d lines)', $this->countLines($directory . '/Description.tsv')));
+
+            $this->importDescription(
+                $directory . '/Description.tsv',
+                $stats,
+                $dryRun,
+                $output
+            );
+        }
+
         $io->success('Import complete');
 
         $io->table(
@@ -240,6 +262,7 @@ class ImportTaxonomyCommand extends Command
                 ['Taxonomy Created', number_format($stats['taxonomy_created'])],
                 ['Vernacular Updated', number_format($stats['vernacular_updated'])],
                 ['Distribution Updated', number_format($stats['distribution_updated'])],
+                ['Description Updated', number_format($stats['description_updated'])],
                 ['Malformed Rows', number_format($stats['malformed_rows'])],
                 ['Duplicates', number_format($stats['duplicates_skipped'])],
             ]
@@ -999,6 +1022,166 @@ class ImportTaxonomyCommand extends Command
                     $this->flushAndClear();
                 }
                 $processedBatchCount = 0;
+            }
+        }
+
+        if (!$dryRun) {
+            $this->flushAndClear();
+        }
+
+        fclose($handle);
+        $progress->finish();
+        $output->writeln('');
+    }
+
+    private function importDescription(
+        string $file,
+        array &$stats,
+        bool $dryRun,
+        OutputInterface $output
+    ): void {
+        if (!is_file($file)) {
+            return;
+        }
+
+        $handle = fopen($file, 'rb');
+        if ($handle === false) {
+            return;
+        }
+
+        $headers = fgetcsv($handle, 0, "\t", '"', '\\');
+        if ($headers === false) {
+            fclose($handle);
+            return;
+        }
+
+        $headers = array_map('trim', $headers);
+        $progress = new ProgressBar($output);
+        $progress->start();
+
+        $batch = 0;
+        
+        // Memory cache to track description updates during this execution run
+        $assignedDescriptionsCache = [];
+
+        // Inline helper to convert standard HTML tags directly into clean Markdown syntax
+        $htmlToMarkdown = function(string $html): string {
+            // 1. Normalize linebreaks and paragraph tags
+            $md = preg_replace('/<(br|br \/|p)>/i', "\n", $html);
+            $md = preg_replace('/<\/p>/i', "\n\n", $md);
+
+            // 2. Convert headers (e.g. <h3>Title</h3> to ### Title)
+            $md = preg_replace_callback('/<h([1-6])>(.*?)<\/h\1>/i', function($matches) {
+                return "\n" . str_repeat('#', (int)$matches[1]) . ' ' . trim($matches[2]) . "\n";
+            }, $md);
+
+            // 3. Handle list elements
+            $md = preg_replace('/<(ul|ol)>/i', "\n", $md);
+            $md = preg_replace('/<\/(ul|ol)>/i', "\n\n", $md);
+            $md = preg_replace('/<li>(.*?)<\/li>/i', "* $1\n", $md);
+
+            // 4. Handle emphasis variables (Bold and Italics)
+            $md = preg_replace('/<([bi]|strong|em)>(.*?)<\/\1>/i', '**$2**', $md);
+
+            // 5. Clean up any remaining rogue unmapped tags and trim whitespace artifacts
+            $md = strip_tags($md);
+            
+            // Clean up excess consecutive newlines down to a max of two
+            $md = preg_replace("/\n{3,}/", "\n\n", $md);
+
+            return trim($md);
+        };
+
+        while (($row = fgetcsv($handle, 0, "\t", '"', '\\')) !== false) {
+            ++$stats['processed'];
+            $progress->advance();
+
+            if (count($row) !== count($headers)) {
+                ++$stats['malformed_rows'];
+                continue;
+            }
+
+            $data = array_combine($headers, $row);
+            if ($data === false) {
+                ++$stats['malformed_rows'];
+                continue;
+            }
+
+            // Strict filter for English language only
+            $language = trim((string) ($data['language'] ?? ''));
+            if ($language !== 'en') {
+                continue;
+            }
+
+            // Strict filter for "description" type only
+            $type = strtolower(trim((string) ($data['type'] ?? '')));
+            if ($type !== 'description') {
+                continue;
+            }
+
+            $taxonId = isset($data['taxonID']) ? (int) $data['taxonID'] : null;
+            $rawDescription = trim((string) ($data['description'] ?? ''));
+
+            if ($taxonId === null || $rawDescription === '') {
+                continue;
+            }
+
+            // Convert incoming text to standard Markdown format
+            $cleanedText = $htmlToMarkdown($rawDescription);
+
+            $speciesId = $this->getSpeciesIdByExternalId($taxonId);
+            if ($speciesId === null) {
+                ++$stats['skipped'];
+                continue;
+            }
+
+            // Retrieve what text this species currently holds (check memory cache first)
+            $currentText = null;
+            if (isset($assignedDescriptionsCache[$speciesId])) {
+                $currentText = $assignedDescriptionsCache[$speciesId];
+            } else {
+                $dbText = $this->connection->fetchOne(
+                    'SELECT description FROM fauna_species WHERE id = :id LIMIT 1',
+                    ['id' => $speciesId]
+                );
+                $currentText = $dbText !== false ? $dbText : null;
+            }
+
+            // Guard against appending identical description duplicates
+            if ($currentText !== null && str_contains($currentText, $cleanedText)) {
+                ++$stats['skipped'];
+                continue;
+            }
+
+            // Concatenate sequentially if multiple 'description'-typed blocks belong to this taxon
+            if ($currentText === null || trim($currentText) === '') {
+                $newDescriptionText = $cleanedText;
+            } else {
+                $newDescriptionText = $currentText . "\n\n" . $cleanedText;
+            }
+
+            // Acquire proxy and prepare changes
+            $species = $this->entityManager->getReference(
+                Species::class,
+                \Ramsey\Uuid\Uuid::fromString($speciesId)
+            );
+
+            if (method_exists($species, 'setDescription')) {
+                $species->setDescription($newDescriptionText);
+                $assignedDescriptionsCache[$speciesId] = $newDescriptionText;
+                
+                ++$stats['description_updated'];
+                ++$batch;
+
+                if ($batch >= self::BATCH_SIZE) {
+                    if (!$dryRun) {
+                        $this->flushAndClear();
+                        if (count($assignedDescriptionsCache) > 30000) {
+                            $assignedDescriptionsCache = [];
+                        }
+                    }
+                    $batch = 0;
+                }
             }
         }
 
