@@ -59,14 +59,23 @@ class SpeciesController extends AbstractController
         $repository = $this->em->getRepository(Species::class);
 
         if ($q === '') {
-            $speciesList = $repository->findBy([], ['name' => 'ASC']);
-        } else {
-            $speciesList = $repository->search($q, 50);
+            return $this->redirectToRoute('fauna_taxonomy_index');
         }
+
+        $page = max(1, $request->query->getInt('page', 1));
+        $limit = 20;
+        $offset = ($page - 1) * $limit;
+
+        $speciesList = $repository->search($q, $limit, $offset);
+        $totalCount = $repository->searchCount($q);
+        $totalPages = (int) ceil($totalCount / $limit);
 
         return $this->render('@Fauna/species/list.html.twig', [
             'species_list' => $speciesList,
             'query' => $q,
+            'page' => $page,
+            'totalPages' => $totalPages,
+            'totalCount' => $totalCount,
         ]);
     }
 

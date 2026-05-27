@@ -29,7 +29,7 @@
                 <a href="{{ path('fauna_lifelist') }}" class="fauna-navbar-link {{ current_route == 'fauna_lifelist' ? 'active' : '' }}">Lifelist</a>
             </li>
             <li>
-                <a href="{{ path('fauna_species_list') }}" class="fauna-navbar-link {{ current_route starts with 'fauna_species_' ? 'active' : '' }}">Species</a>
+                <a href="{{ path('fauna_taxonomy_index') }}" class="fauna-navbar-link {{ (current_route starts with 'fauna_species_' or current_route starts with 'fauna_taxonomy_') ? 'active' : '' }}">Species</a>
             </li>
             <li>
                 <a href="{{ path('fauna_trip_list') }}" class="fauna-navbar-link {{ current_route starts with 'fauna_trip_' ? 'active' : '' }}">Trips</a>

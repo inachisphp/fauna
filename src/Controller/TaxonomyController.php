@@ -22,6 +22,16 @@ class TaxonomyController extends AbstractController
         private EntityManagerInterface $em
     ) {}
 
+    #[Route('/tax', name: 'fauna_taxonomy_index', methods: ['GET'])]
+    public function index(): Response
+    {
+        $roots = $this->em->getRepository(Taxonomy::class)->findBy(['parent' => null], ['name' => 'ASC']);
+
+        return $this->render('@Fauna/taxonomy/index.html.twig', [
+            'roots' => $roots,
+        ]);
+    }
+
     #[Route('/tax/{id}', name: 'fauna_taxonomy_show', methods: ['GET'])]
     public function show(string $id): Response
     {

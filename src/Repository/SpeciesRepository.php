@@ -27,7 +27,7 @@ class SpeciesRepository extends ServiceEntityRepository
     /**
      * @return array<Species>
      */
-    public function search(string $keyword, int $limit = 20): array
+    public function search(string $keyword, int $limit = 20, int $offset = 0): array
     {
         return $this->createQueryBuilder('s')
             ->addSelect('(CASE WHEN s.name LIKE :keyword THEN 1 ELSE 0 END) AS HIDDEN name_priority')
@@ -36,9 +36,21 @@ class SpeciesRepository extends ServiceEntityRepository
             ->setParameter('keyword', '%' . $keyword . '%')
             ->orderBy('name_priority', 'DESC')
             ->addOrderBy('s.name', 'ASC')
+            ->setFirstResult($offset)
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();
+    }
+
+    public function searchCount(string $keyword): int
+    {
+        return (int) $this->createQueryBuilder('s')
+            ->select('COUNT(s.id)')
+            ->where('s.name LIKE :keyword')
+            ->orWhere('s.latin LIKE :keyword')
+            ->setParameter('keyword', '%' . $keyword . '%')
+            ->getQuery()
+            ->getSingleScalarResult();
     }
 
     /**

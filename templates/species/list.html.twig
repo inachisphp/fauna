@@ -23,6 +23,11 @@
     </div>
 
     {% if species_list is defined and species_list is not empty %}
+        {% if totalCount is defined %}
+            <p class="fauna-text-muted fauna-margin-bottom-1">
+                Found {{ totalCount }} species matching "<strong>{{ query }}</strong>".
+            </p>
+        {% endif %}
         <ul class="fauna-list-reset fauna-grid">
             {% for species in species_list %}
                 <li class="fauna-card">
@@ -44,6 +49,18 @@
                 </li>
             {% endfor %}
         </ul>
+
+        {% if totalPages is defined and totalPages > 1 %}
+            <nav aria-label="Species search pagination" class="fauna-toolbar fauna-toolbar-center fauna-margin-top-2">
+                {% if page > 1 %}
+                    <a href="{{ path('fauna_species_list', {q: query, page: page - 1}) }}" class="fauna-btn fauna-btn-small">← Previous</a>
+                {% endif %}
+                <span class="fauna-text-muted fauna-align-self-center">Page {{ page }} of {{ totalPages }}</span>
+                {% if page < totalPages %}
+                    <a href="{{ path('fauna_species_list', {q: query, page: page + 1}) }}" class="fauna-btn fauna-btn-small">Next →</a>
+                {% endif %}
+            </nav>
+        {% endif %}
     {% else %}
         {% if query is defined and query != '' %}
             <div class="fauna-card fauna-card-compact fauna-card-center">

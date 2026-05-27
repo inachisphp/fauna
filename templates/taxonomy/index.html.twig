@@ -1,0 +1,37 @@
+{% extends '@Fauna/layout.html.twig' %}
+
+{% block title %}Taxonomy Directory - Fauna{% endblock %}
+
+{% block fauna_body %}
+<main class="fauna-container" id="maincontent">
+    <header class="fauna-page-header">
+        <div>
+            <h1>Taxonomy Directory</h1>
+            <p class="fauna-page-subtitle">Browse wildlife catalogued in Fauna by their scientific classification tree.</p>
+        </div>
+    </header>
+
+    <div class="fauna-card">
+        <section aria-labelledby="tax-roots-heading">
+            <h2 id="tax-roots-heading" class="fauna-section-title">Root Classifications</h2>
+            {% if roots is not empty %}
+                <ul class="fauna-list-reset fauna-grid-cols-2">
+                    {% for root in roots %}
+                        <li>
+                            <a href="{{ path('fauna_taxonomy_show', {id: root.id.toString()}) }}" class="fauna-card-link">
+                                {% if root.common %}
+                                    <strong>{{ root.common }}</strong>
+                                {% endif %}
+                                <em class="fauna-text-muted fauna-text-small">{{ root.name }}</em>
+                                <span class="fauna-text-muted fauna-text-small fauna-inline-label fauna-capitalize">{{ root.type }}</span>
+                            </a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="fauna-text-muted">No taxonomic records found. Seeding the database may be required.</p>
+            {% endif %}
+        </section>
+    </div>
+</main>
+{% endblock %}
