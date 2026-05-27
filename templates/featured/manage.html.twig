@@ -1,9 +1,8 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}Manage Featured Species - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
     {% for label, messages in app.flashes %}
@@ -12,47 +11,50 @@
         {% endfor %}
     {% endfor %}
 
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
-        <h1 style="margin: 0;">Manage Featured Species</h1>
+    <header class="fauna-page-header">
+        <div>
+            <h1>Manage Featured Species</h1>
+            <p class="fauna-page-subtitle">Review and schedule species features for the Fauna homepage.</p>
+        </div>
         <a href="{{ path('fauna_featured_new') }}" class="fauna-btn" role="button">Add Featured Entry</a>
     </header>
 
     {% if all_featured is not empty %}
-        <div class="fauna-card" style="padding: 0; overflow: hidden;">
-            <table style="width: 100%; border-collapse: collapse;" aria-label="Featured species schedule">
+        <div class="fauna-card fauna-card-table">
+            <table class="fauna-table" aria-label="Featured species schedule">
                 <thead>
-                    <tr style="background: #1b271b; text-align: left;">
-                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Species</th>
-                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Scheduled</th>
-                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Status</th>
-                        <th scope="col" style="padding: 1rem; font-weight: 600; border-bottom: 1px solid var(--fauna-border);">Actions</th>
+                    <tr>
+                        <th scope="col">Species</th>
+                        <th scope="col">Scheduled</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for featured in all_featured %}
-                        <tr style="border-bottom: 1px solid var(--fauna-border);">
-                            <td style="padding: 1rem;">
+                        <tr>
+                            <td>
                                 <strong>{{ featured.title }}</strong>
                                 {% if featured.species %}
-                                    <span style="color: var(--fauna-text-muted); font-size: 0.875rem; display: block; font-style: italic;">{{ featured.species.latin }}</span>
+                                    <span class="fauna-text-muted fauna-text-small fauna-block fauna-italic">{{ featured.species.latin }}</span>
                                 {% endif %}
                             </td>
-                            <td style="padding: 1rem; color: var(--fauna-text-muted);">
+                            <td class="fauna-text-muted fauna-text-small">
                                 {% if featured.scheduleDate %}
                                     <time datetime="{{ featured.scheduleDate|date('Y-m-d\\TH:i') }}">{{ featured.scheduleDate|date('d M Y H:i') }}</time>
                                 {% else %}
                                     <em>Immediate</em>
                                 {% endif %}
                             </td>
-                            <td style="padding: 1rem;">
+                            <td>
                                 {% if featured.isLive %}
-                                    <span style="display: inline-block; padding: 0.25rem 0.75rem; background: #1d3a1d; color: #d1ffd1; border-radius: 20px; font-size: 0.875rem; font-weight: 600;">Live</span>
+                                    <span class="fauna-pill fauna-pill--live">Live</span>
                                 {% else %}
-                                    <span style="display: inline-block; padding: 0.25rem 0.75rem; background: #2b2b2b; color: var(--fauna-text-muted); border-radius: 20px; font-size: 0.875rem;">Draft</span>
+                                    <span class="fauna-pill fauna-pill--draft">Draft</span>
                                 {% endif %}
                             </td>
-                            <td style="padding: 1rem;">
-                                <a href="{{ path('fauna_featured_edit', {id: featured.id.toString()}) }}" class="fauna-btn" style="padding: 0.4rem 0.9rem; font-size: 0.875rem;">Edit</a>
+                            <td>
+                                <a href="{{ path('fauna_featured_edit', {id: featured.id.toString()}) }}" class="fauna-btn fauna-btn-small">Edit</a>
                             </td>
                         </tr>
                     {% endfor %}
@@ -60,9 +62,9 @@
             </table>
         </div>
     {% else %}
-        <div class="fauna-card" style="text-align: center; padding: 3rem 1.5rem;">
+        <div class="fauna-card fauna-card-center">
             <h2>No featured entries yet</h2>
-            <p style="color: var(--fauna-text-muted); margin-bottom: 1.5rem;">Schedule a species to appear on the homepage.</p>
+            <p class="fauna-text-muted fauna-margin-bottom-1">Schedule a species to appear on the homepage.</p>
             <a href="{{ path('fauna_featured_new') }}" class="fauna-btn" role="button">Add First Entry</a>
         </div>
     {% endif %}

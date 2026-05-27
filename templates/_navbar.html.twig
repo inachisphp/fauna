@@ -1,0 +1,44 @@
+{% set current_route = app.request.attributes.get('_route') %}
+<nav class="fauna-navbar" aria-label="Plugin Navigation">
+    <div class="fauna-navbar-container">
+        <a href="{{ path('fauna_lifelist') }}" class="fauna-navbar-brand">
+            <span>Fauna 🌿</span>
+        </a>
+
+        <div class="fauna-navbar-search">
+            <!-- Search icon SVG -->
+            <svg class="fauna-search-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.637 10.637z" />
+            </svg>
+            <input 
+                type="search" 
+                id="fauna-nav-search-input" 
+                placeholder="Search species..." 
+                aria-label="Search species"
+                aria-autocomplete="list"
+                aria-controls="fauna-nav-search-results"
+                autocomplete="off"
+                data-search-url="{{ path('fauna_species_search') }}"
+                data-show-url-template="{{ path('fauna_species_show', {id: 'PLACEHOLDER'}) }}"
+            />
+            <div id="fauna-nav-search-results" class="fauna-search-results-dropdown" role="listbox" aria-label="Search results"></div>
+        </div>
+
+        <ul class="fauna-navbar-menu">
+            <li>
+                <a href="{{ path('fauna_lifelist') }}" class="fauna-navbar-link {{ current_route == 'fauna_lifelist' ? 'active' : '' }}">Lifelist</a>
+            </li>
+            <li>
+                <a href="{{ path('fauna_species_list') }}" class="fauna-navbar-link {{ current_route starts with 'fauna_species_' ? 'active' : '' }}">Species</a>
+            </li>
+            <li>
+                <a href="{{ path('fauna_trip_list') }}" class="fauna-navbar-link {{ current_route starts with 'fauna_trip_' ? 'active' : '' }}">Trips</a>
+            </li>
+            {% if is_granted('ROLE_ADMIN') %}
+                <li>
+                    <a href="{{ path('fauna_featured_manage') }}" class="fauna-navbar-link {{ current_route starts with 'fauna_featured_' ? 'active' : '' }}">Featured</a>
+                </li>
+            {% endif %}
+        </ul>
+    </div>
+</nav>

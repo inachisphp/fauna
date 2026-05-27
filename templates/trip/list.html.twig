@@ -1,9 +1,8 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}My Trips - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
     {% for label, messages in app.flashes %}
@@ -12,26 +11,29 @@
         {% endfor %}
     {% endfor %}
 
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
-        <h1 style="margin: 0;">My Trips</h1>
+    <header class="fauna-page-header">
+        <div>
+            <h1>My Trips</h1>
+            <p class="fauna-page-subtitle">Plan and review trips, then add sightings to build your personal wildlife log.</p>
+        </div>
         <a href="{{ path('fauna_trip_new') }}" class="fauna-btn" role="button">Plan New Trip</a>
     </header>
 
     {% if trips is not empty %}
-        <ul style="list-style: none; padding: 0;">
+        <ul class="fauna-list-reset fauna-grid">
         {% for item in trips %}
             {% set trip = item.entity %}
             <li class="fauna-card">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+                <div class="fauna-card-header">
                     <div>
-                        <h2 style="margin: 0 0 0.25rem;">
+                        <h2 class="fauna-heading-tight">
                             <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}">{{ trip.name }}</a>
                         </h2>
                         {% if trip.location %}
-                            <p style="color: var(--fauna-text-muted); margin: 0 0 0.5rem;">📍 {{ trip.location }}</p>
+                            <p class="fauna-text-muted fauna-subtitle">📍 {{ trip.location }}</p>
                         {% endif %}
                         {% if trip.startDate %}
-                            <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin: 0;">
+                            <p class="fauna-text-muted fauna-text-small fauna-no-margin">
                                 <time datetime="{{ trip.startDate|date('Y-m-d') }}">{{ trip.startDate|date('d M Y') }}</time>
                                 —
                                 <time datetime="{{ trip.endDate|date('Y-m-d') }}">{{ trip.endDate|date('d M Y') }}</time>
@@ -39,35 +41,35 @@
                             </p>
                         {% endif %}
                     </div>
-                    <div style="text-align: right;">
-                        <p style="font-size: 2rem; font-weight: 800; margin: 0; color: var(--fauna-primary);">{{ item.sighting_count }}</p>
-                        <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">sighting{{ item.sighting_count != 1 ? 's' }}</p>
+                    <div class="fauna-stat-block">
+                        <p class="fauna-detail-value fauna-detail-value--primary">{{ item.sighting_count }}</p>
+                        <p class="fauna-text-muted fauna-text-small fauna-no-margin">sighting{{ item.sighting_count != 1 ? 's' }}</p>
                     </div>
                 </div>
-                <div style="margin-top: 1rem; display: flex; gap: 0.75rem;">
-                    <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}" class="fauna-btn" style="padding: 0.5rem 1rem; font-size: 0.875rem;">View</a>
-                    <a href="{{ path('fauna_trip_edit', {id: trip.id.toString()}) }}" class="fauna-btn" style="padding: 0.5rem 1rem; font-size: 0.875rem; background-color: #2b3b2b;">Edit</a>
-                    <a href="{{ path('fauna_sighting_new') }}?trip={{ trip.id.toString() }}" class="fauna-btn" style="padding: 0.5rem 1rem; font-size: 0.875rem; background-color: #1b2b3b;">Add Sighting</a>
+                <div class="fauna-toolbar">
+                    <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}" class="fauna-btn fauna-btn-small">View</a>
+                    <a href="{{ path('fauna_trip_edit', {id: trip.id.toString()}) }}" class="fauna-btn fauna-secondary fauna-btn-small">Edit</a>
+                    <a href="{{ path('fauna_sighting_new') }}?trip={{ trip.id.toString() }}" class="fauna-btn fauna-secondary fauna-btn-small">Add Sighting</a>
                 </div>
             </li>
         {% endfor %}
         </ul>
 
         {% if totalPages > 1 %}
-            <nav aria-label="Trip pagination" style="display: flex; gap: 0.5rem; justify-content: center; margin-top: 2rem;">
+            <nav aria-label="Trip pagination" class="fauna-toolbar fauna-toolbar-center fauna-margin-top-2">
                 {% if page > 1 %}
-                    <a href="{{ path('fauna_trip_list', {page: page - 1}) }}" class="fauna-btn" style="padding: 0.5rem 1rem;">← Previous</a>
+                    <a href="{{ path('fauna_trip_list', {page: page - 1}) }}" class="fauna-btn fauna-btn-small">← Previous</a>
                 {% endif %}
-                <span style="align-self: center; color: var(--fauna-text-muted);">Page {{ page }} of {{ totalPages }}</span>
+                <span class="fauna-text-muted fauna-align-self-center">Page {{ page }} of {{ totalPages }}</span>
                 {% if page < totalPages %}
-                    <a href="{{ path('fauna_trip_list', {page: page + 1}) }}" class="fauna-btn" style="padding: 0.5rem 1rem;">Next →</a>
+                    <a href="{{ path('fauna_trip_list', {page: page + 1}) }}" class="fauna-btn fauna-btn-small">Next →</a>
                 {% endif %}
             </nav>
         {% endif %}
     {% else %}
-        <div class="fauna-card" style="text-align: center; padding: 3rem 1.5rem;">
+        <div class="fauna-card fauna-card-center">
             <h2>No trips recorded yet</h2>
-            <p style="color: var(--fauna-text-muted); margin-bottom: 1.5rem;">Plan a trip to start grouping your sightings together.</p>
+            <p class="fauna-text-muted fauna-margin-bottom-1">Plan a trip to start grouping your sightings together.</p>
             <a href="{{ path('fauna_trip_new') }}" class="fauna-btn" role="button">Plan Your First Trip</a>
         </div>
     {% endif %}

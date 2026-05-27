@@ -1,43 +1,57 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}All Species - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
-    <h1>All Species</h1>
+    <header class="fauna-page-header">
+        <div>
+            <h1>All Species</h1>
+            <p class="fauna-page-subtitle">Search and explore every species currently registered in the Fauna catalogue.</p>
+        </div>
+    </header>
 
     <div class="fauna-card">
-        <form action="{{ path('fauna_species_search') }}" method="get" class="nice_form" aria-label="Species Search">
+        <form action="{{ path('fauna_species_list') }}" method="get" class="nice_form" aria-label="Species Search">
             <div class="fauna-form-group">
                 <label for="species_search_q">Search Species</label>
-                <input type="text" name="q" id="species_search_q" placeholder="Enter common or scientific name..." required />
+                <input type="text" name="q" id="species_search_q" value="{{ query|default('') }}" placeholder="Enter common or scientific name..." />
             </div>
             <button type="submit" class="fauna-btn">Search</button>
         </form>
     </div>
 
     {% if species_list is defined and species_list is not empty %}
-        <ul style="list-style: none; padding: 0;">
+        <ul class="fauna-list-reset fauna-grid">
             {% for species in species_list %}
                 <li class="fauna-card">
-                    <h2>
-                        <a href="{{ path('fauna_species_show', {id: species.id.toString()}) }}">
-                            {{ species.name }} (<em>{{ species.latin }}</em>)
-                        </a>
-                    </h2>
-                    {% if species.iucn %}
-                        <span class="fauna-iucn-badge">IUCN: {{ species.iucn }}</span>
-                    {% endif %}
+                    <div class="fauna-card-header">
+                        <div>
+                            <h2>
+                                <a href="{{ path('fauna_species_show', {id: species.id.toString()}) }}">
+                                    {{ species.name }} (<em>{{ species.latin }}</em>)
+                                </a>
+                            </h2>
+                            {% if species.iucn %}
+                                <span class="fauna-iucn-badge fauna-iucn-badge--{{ species.iucn|lower }}">IUCN: {{ species.iucn }}</span>
+                            {% endif %}
+                        </div>
+                    </div>
                     {% if species.description %}
-                        <p>{{ species.description|slice(0, 150) }}...</p>
+                        <p class="fauna-meta">{{ species.description|slice(0, 150) }}...</p>
                     {% endif %}
                 </li>
             {% endfor %}
         </ul>
     {% else %}
-        <p>No species currently registered. Use console command to seed default species.</p>
+        {% if query is defined and query != '' %}
+            <div class="fauna-card fauna-card-compact fauna-card-center">
+                <p>No species matched "<strong>{{ query }}</strong>". Try a different name.</p>
+            </div>
+        {% else %}
+            <p>No species currently registered. Use console command to seed default species.</p>
+        {% endif %}
     {% endif %}
 </main>
 {% endblock %}

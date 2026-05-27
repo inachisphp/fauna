@@ -1,15 +1,14 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}{{ is_new ? 'Add Sighting' : 'Edit Sighting' }} - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 <!-- Include Leaflet CSS and JS for mapping -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
 <main class="fauna-container" id="maincontent">
-    <nav aria-label="Breadcrumb">
+    <nav aria-label="Breadcrumb" class="fauna-breadcrumb fauna-breadcrumb--spaced">
         <a href="{{ path('fauna_lifelist') }}">Back to Lifelist</a>
     </nav>
 
@@ -42,29 +41,29 @@
                 {{ form_errors(form.location) }}
             </div>
 
-            <fieldset style="border: 1px solid var(--fauna-border); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;">
-                <legend style="padding: 0 0.5rem; font-weight: 600; color: #ffffff;">Coordinates</legend>
+            <fieldset class="fauna-fieldset">
+                <legend>Coordinates</legend>
                 
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
-                    <div class="fauna-form-group" style="margin-bottom: 0;">
+                <div class="fauna-form-grid-2 fauna-margin-bottom-1">
+                    <div class="fauna-form-group fauna-no-margin">
                         {{ form_label(form.latitude, 'Latitude') }}
                         {{ form_widget(form.latitude, {'id': 'sighting_lat'}) }}
                         {{ form_errors(form.latitude) }}
                     </div>
-                    <div class="fauna-form-group" style="margin-bottom: 0;">
+                    <div class="fauna-form-group fauna-no-margin">
                         {{ form_label(form.longitude, 'Longitude') }}
                         {{ form_widget(form.longitude, {'id': 'sighting_long'}) }}
                         {{ form_errors(form.longitude) }}
                     </div>
                 </div>
 
-                <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1rem;">
-                    <button type="button" class="fauna-btn" style="background-color: #2b3b2b;" onclick="getCurrentLocation()">
+                <div class="fauna-toolbar fauna-margin-bottom-1">
+                    <button type="button" class="fauna-btn fauna-secondary" onclick="getCurrentLocation()">
                         Use Current Location
                     </button>
                 </div>
 
-                <div id="map_canvas" class="fauna-map" style="display: none;"></div>
+                <div id="map_canvas" class="fauna-map fauna-hidden"></div>
             </fieldset>
 
             <div class="fauna-form-group">
@@ -73,7 +72,7 @@
                 {{ form_errors(form.notes) }}
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="fauna-form-grid-2">
                 <div class="fauna-form-group">
                     {{ form_label(form.count, 'Count') }}
                     {{ form_widget(form.count) }}
@@ -92,9 +91,9 @@
                 {{ form_errors(form.photograph) }}
             </div>
 
-            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+            <div class="fauna-toolbar">
                 <button type="submit" class="fauna-btn">Save Sighting</button>
-                <a href="{{ path('fauna_lifelist') }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+                <a href="{{ path('fauna_lifelist') }}" class="fauna-btn fauna-secondary" role="button">Cancel</a>
             </div>
 
         {{ form_end(form) }}

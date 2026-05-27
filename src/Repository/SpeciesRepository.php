@@ -30,10 +30,12 @@ class SpeciesRepository extends ServiceEntityRepository
     public function search(string $keyword, int $limit = 20): array
     {
         return $this->createQueryBuilder('s')
+            ->addSelect('(CASE WHEN s.name LIKE :keyword THEN 1 ELSE 0 END) AS HIDDEN name_priority')
             ->where('s.name LIKE :keyword')
             ->orWhere('s.latin LIKE :keyword')
             ->setParameter('keyword', '%' . $keyword . '%')
-            ->orderBy('s.name', 'ASC')
+            ->orderBy('name_priority', 'DESC')
+            ->addOrderBy('s.name', 'ASC')
             ->setMaxResults($limit)
             ->getQuery()
             ->getResult();

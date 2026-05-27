@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block body %}
+    {% include '@Fauna/_styles.html.twig' %}
+    
+    {% include '@Fauna/_navbar.html.twig' %}
+    
+    {% block fauna_body %}{% endblock %}
+    
+    {% include '@Fauna/_scripts.html.twig' %}
+{% endblock %}

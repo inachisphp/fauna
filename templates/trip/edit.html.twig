@@ -1,12 +1,11 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}{{ is_new ? 'Plan New Trip' : 'Edit Trip: ' ~ trip.name }} - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
-    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+    <nav aria-label="Breadcrumb" class="fauna-breadcrumb--spaced">
         {% if is_new %}
             <a href="{{ path('fauna_trip_list') }}">← My Trips</a>
         {% else %}
@@ -29,10 +28,10 @@
                 {{ form_label(form.location, 'Location') }}
                 {{ form_widget(form.location) }}
                 {{ form_errors(form.location) }}
-                <p style="color: var(--fauna-text-muted); font-size: 0.875rem; margin-top: 0.25rem;">A descriptive location name, e.g. "Yorkshire Dales" or "Kenya Safari".</p>
+                <p class="fauna-text-muted fauna-text-small fauna-margin-top-1">A descriptive location name, e.g. "Yorkshire Dales" or "Kenya Safari".</p>
             </div>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div class="fauna-form-grid-2">
                 <div class="fauna-form-group">
                     {{ form_label(form.startDate, 'Start Date') }}
                     {{ form_widget(form.startDate) }}
@@ -45,12 +44,12 @@
                 </div>
             </div>
 
-            <div style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+            <div class="fauna-toolbar fauna-margin-top-2">
                 <button type="submit" class="fauna-btn">{{ is_new ? 'Create Trip' : 'Save Changes' }}</button>
                 {% if is_new %}
-                    <a href="{{ path('fauna_trip_list') }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+                    <a href="{{ path('fauna_trip_list') }}" class="fauna-btn fauna-btn-muted" role="button">Cancel</a>
                 {% else %}
-                    <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}" class="fauna-btn" style="background-color: #3d3d3d;" role="button">Cancel</a>
+                    <a href="{{ path('fauna_trip_show', {id: trip.id.toString()}) }}" class="fauna-btn fauna-btn-muted" role="button">Cancel</a>
                 {% endif %}
             </div>
 

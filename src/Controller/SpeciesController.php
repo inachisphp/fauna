@@ -52,6 +52,24 @@ class SpeciesController extends AbstractController
         ]);
     }
 
+    #[Route('/species', name: 'fauna_species_list', methods: ['GET'])]
+    public function list(Request $request): Response
+    {
+        $q = trim((string) $request->query->get('q', ''));
+        $repository = $this->em->getRepository(Species::class);
+
+        if ($q === '') {
+            $speciesList = $repository->findBy([], ['name' => 'ASC']);
+        } else {
+            $speciesList = $repository->search($q, 50);
+        }
+
+        return $this->render('@Fauna/species/list.html.twig', [
+            'species_list' => $speciesList,
+            'query' => $q,
+        ]);
+    }
+
     #[Route('/api/species/search', name: 'fauna_species_search', methods: ['GET'])]
     public function search(Request $request): JsonResponse
     {

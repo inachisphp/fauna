@@ -1,0 +1,190 @@
+<script>
+(function () {
+    // Helper to escape HTML characters
+    const escapeHtml = (value) => value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+    // --- Markdown Renderer ---
+    const markdownBlocks = Array.from(document.querySelectorAll('.fauna-description-markdown'));
+    
+    if (markdownBlocks.length > 0) {
+        const renderMarkdown = (source) => {
+            let html = escapeHtml(source.trim());
+            html = html.replace(/^###\s*(.+)$/gm, '<h3>$1</h3>');
+            html = html.replace(/^##\s*(.+)$/gm, '<h2>$1</h2>');
+            html = html.replace(/^#\s*(.+)$/gm, '<h1>$1</h1>');
+            html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+            html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+            html = html.replace(/(^|\n)([\-*+]\s+.+)(\n|$)/g, function (_, before, listBlock) {
+                const items = listBlock.trim().split(/\n/).map(line => line.replace(/^[\-*+]\s+/, ''));
+                return before + '<ul>' + items.map(item => '<li>' + item + '</li>').join('') + '</ul>';
+            });
+
+            html = html.split(/\n{2,}/).map((chunk) => {
+                const trimmed = chunk.trim();
+                if (!trimmed) {
+                    return '';
+                }
+                if (/^<h[1-3]>/.test(trimmed) || /^<ul>/.test(trimmed) || /^<ol>/.test(trimmed)) {
+                    return trimmed;
+                }
+                return '<p>' + trimmed.replace(/\n/g, '<br>') + '</p>';
+            }).join('');
+
+            return html;
+        };
+
+        const renderAllMarkdown = () => {
+            markdownBlocks.forEach((element) => {
+                const originalText = element.textContent || '';
+                const rendered = renderMarkdown(originalText);
+                if (rendered && element.innerHTML !== rendered) {
+                    element.innerHTML = rendered;
+                }
+            });
+        };
+
+        document.addEventListener('DOMContentLoaded', renderAllMarkdown);
+        window.addEventListener('beforeprint', renderAllMarkdown);
+    }
+
+    // --- Debounced Live Search ---
+    const searchInput = document.getElementById('fauna-nav-search-input');
+    const resultsContainer = document.getElementById('fauna-nav-search-results');
+
+    const debounce = (func, wait) => {
+        let timeout;
+        return function (...args) {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(this, args), wait);
+        };
+    };
+
+    if (searchInput && resultsContainer) {
+        let selectedIndex = -1;
+        let items = [];
+
+        const hideResults = () => {
+            resultsContainer.style.display = 'none';
+            selectedIndex = -1;
+        };
+
+        const showResults = () => {
+            if (items.length > 0) {
+                resultsContainer.style.display = 'block';
+            }
+        };
+
+        const updateActiveItem = () => {
+            const resultItems = resultsContainer.querySelectorAll('.fauna-search-result-item');
+            resultItems.forEach((item, index) => {
+                if (index === selectedIndex) {
+                    item.classList.add('active');
+                    item.setAttribute('aria-selected', 'true');
+                    searchInput.setAttribute('aria-activedescendant', item.id);
+                    item.scrollIntoView({ block: 'nearest' });
+                } else {
+                    item.classList.remove('active');
+                    item.setAttribute('aria-selected', 'false');
+                }
+            });
+        };
+
+        const performSearch = async (query) => {
+            if (query.length < 2) {
+                hideResults();
+                return;
+            }
+
+            resultsContainer.innerHTML = '<div class="fauna-search-loading"><span class="fauna-spinner"></span>Searching...</div>';
+            resultsContainer.style.display = 'block';
+
+            try {
+                const searchUrl = searchInput.dataset.searchUrl;
+                const showUrlTemplate = searchInput.dataset.showUrlTemplate;
+                
+                const url = new URL(searchUrl, window.location.origin);
+                url.searchParams.set('q', query);
+
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Search request failed');
+
+                items = await response.json();
+                if (items.length === 0) {
+                    resultsContainer.innerHTML = '<div class="fauna-search-no-results">No species found</div>';
+                    selectedIndex = -1;
+                    return;
+                }
+
+                resultsContainer.innerHTML = items.map((item, index) => {
+                    const detailUrl = showUrlTemplate.replace('PLACEHOLDER', item.id);
+                    return `
+                        <a href="${detailUrl}" class="fauna-search-result-item" role="option" id="fauna-search-option-${index}">
+                            <span class="fauna-search-result-name">${escapeHtml(item.name)}</span>
+                            <span class="fauna-search-result-latin">${escapeHtml(item.latin)}</span>
+                        </a>
+                    `;
+                }).join('');
+                selectedIndex = -1;
+            } catch (e) {
+                resultsContainer.innerHTML = '<div class="fauna-search-error">Failed to load results</div>';
+                selectedIndex = -1;
+            }
+        };
+
+        searchInput.addEventListener('input', debounce((e) => {
+            performSearch(e.target.value.trim());
+        }, 250));
+
+        searchInput.addEventListener('keydown', (e) => {
+            const resultItems = resultsContainer.querySelectorAll('.fauna-search-result-item');
+            
+            if (resultsContainer.style.display === 'none') {
+                if (e.key === 'ArrowDown' && searchInput.value.trim().length >= 2) {
+                    performSearch(searchInput.value.trim());
+                }
+                return;
+            }
+
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                if (resultItems.length > 0) {
+                    selectedIndex = (selectedIndex + 1) % resultItems.length;
+                    updateActiveItem();
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                if (resultItems.length > 0) {
+                    selectedIndex = (selectedIndex - 1 + resultItems.length) % resultItems.length;
+                    updateActiveItem();
+                }
+            } else if (e.key === 'Enter') {
+                if (selectedIndex >= 0 && selectedIndex < resultItems.length) {
+                    e.preventDefault();
+                    resultItems[selectedIndex].click();
+                }
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                hideResults();
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !resultsContainer.contains(e.target)) {
+                hideResults();
+            }
+        });
+
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim().length >= 2) {
+                showResults();
+            }
+        });
+    }
+})();
+</script>

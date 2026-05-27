@@ -1,14 +1,13 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}Sighting: {{ sighting.species.name }} - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
 <main class="fauna-container" id="maincontent">
-    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+    <nav aria-label="Breadcrumb" class="fauna-breadcrumb fauna-breadcrumb--spaced">
         <a href="{{ path('fauna_lifelist') }}">← Lifelist</a>
         {% if sighting.trip %}
             / <a href="{{ path('fauna_trip_show', {id: sighting.trip.id.toString()}) }}">{{ sighting.trip.name }}</a>
@@ -26,43 +25,39 @@
             <h1 itemprop="about" itemscope itemtype="https://schema.org/Taxon">
                 <span itemprop="name">{{ sighting.species.name }}</span>
             </h1>
-            <p style="font-style: italic; color: var(--fauna-text-muted); margin-top: -0.5rem;">
-                {{ sighting.species.latin }}
-            </p>
+            <p class="fauna-subtitle">{{ sighting.species.latin }}</p>
         </header>
 
-        <div style="display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 1.5rem 0;">
-            <div>
-                <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Count</p>
-                <p style="margin: 0; font-size: 1.5rem; font-weight: 700;">{{ sighting.count }}</p>
+        <div class="fauna-detail-grid">
+            <div class="fauna-detail-block">
+                <strong>Count</strong>
+                <p class="fauna-detail-value">{{ sighting.count }}</p>
             </div>
-            <div>
-                <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Date Recorded</p>
-                <p style="margin: 0; font-size: 1.25rem; font-weight: 600;" itemprop="temporalCoverage">
+            <div class="fauna-detail-block">
+                <strong>Date Recorded</strong>
+                <p class="fauna-detail-value-secondary" itemprop="temporalCoverage">
                     <time datetime="{{ sighting.date|date('Y-m-d\\TH:i') }}">
                         {{ sighting.date|date('d M Y \\a\\t H:i') }}
                     </time>
                 </p>
             </div>
             {% if sighting.trip %}
-                <div>
-                    <p style="margin: 0; color: var(--fauna-text-muted); font-size: 0.875rem;">Trip</p>
-                    <p style="margin: 0;">
-                        <a href="{{ path('fauna_trip_show', {id: sighting.trip.id.toString()}) }}">{{ sighting.trip.name }}</a>
-                    </p>
+                <div class="fauna-detail-block">
+                    <strong>Trip</strong>
+                    <p class="fauna-no-margin"><a href="{{ path('fauna_trip_show', {id: sighting.trip.id.toString()}) }}">{{ sighting.trip.name }}</a></p>
                 </div>
             {% endif %}
         </div>
 
         {% if sighting.notes %}
-            <section aria-labelledby="notes-heading" style="margin-bottom: 1.5rem;">
-                <h2 id="notes-heading" style="font-size: 1rem; color: var(--fauna-text-muted);">Notes</h2>
+            <section aria-labelledby="notes-heading" class="fauna-page-section">
+                <h2 id="notes-heading" class="fauna-section-title fauna-text-muted">Notes</h2>
                 <p>{{ sighting.notes|nl2br }}</p>
             </section>
         {% endif %}
 
-        <section aria-labelledby="location-heading" itemscope itemtype="https://schema.org/Place">
-            <h2 id="location-heading" style="font-size: 1.1rem;">Location Details</h2>
+        <section aria-labelledby="location-heading" class="fauna-page-section" itemscope itemtype="https://schema.org/Place">
+            <h2 id="location-heading" class="fauna-section-title">Location Details</h2>
             {% if sighting.location %}
                 <p><strong>Place:</strong> <span itemprop="name">{{ sighting.location }}</span></p>
             {% endif %}
@@ -80,9 +75,9 @@
         </section>
 
         {% if app.user and app.user == sighting.user %}
-            <div style="display: flex; gap: 1rem; margin-top: 2rem; flex-wrap: wrap;">
+            <div class="fauna-toolbar">
                 <a href="{{ path('fauna_sighting_edit', {id: sighting.id.toString()}) }}" class="fauna-btn" role="button">Edit Sighting</a>
-                <form action="{{ path('fauna_sighting_delete', {id: sighting.id.toString()}) }}" method="post" onsubmit="return confirm('Delete this sighting? This cannot be undone.');">
+                <form action="{{ path('fauna_sighting_delete', {id: sighting.id.toString()}) }}" method="post" onsubmit="return confirm('Delete this sighting? This cannot be undone.');" class="fauna-form-inline">
                     <input type="hidden" name="_token" value="{{ csrf_token('delete-sighting-' ~ sighting.id.toString()) }}">
                     <button type="submit" class="fauna-btn fauna-btn-danger">Delete</button>
                 </form>

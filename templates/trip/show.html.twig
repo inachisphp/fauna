@@ -1,12 +1,11 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}{{ trip.name }} - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
-    <nav aria-label="Breadcrumb" style="margin-bottom: 1.5rem;">
+    <nav aria-label="Breadcrumb" class="fauna-breadcrumb fauna-breadcrumb--spaced">
         <a href="{{ path('fauna_trip_list') }}">← My Trips</a>
     </nav>
 
@@ -17,14 +16,14 @@
     {% endfor %}
 
     <article class="fauna-card">
-        <header style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem;">
+        <header class="fauna-card-header">
             <div>
-                <h1 style="margin: 0 0 0.25rem;">{{ trip.name }}</h1>
+                <h1 class="fauna-heading-tight">{{ trip.name }}</h1>
                 {% if trip.location %}
-                    <p style="color: var(--fauna-text-muted); margin: 0 0 0.5rem;">📍 {{ trip.location }}</p>
+                    <p class="fauna-text-muted fauna-subtitle">📍 {{ trip.location }}</p>
                 {% endif %}
                 {% if trip.startDate %}
-                    <p style="color: var(--fauna-text-muted); font-size: 0.9rem; margin: 0;">
+                    <p class="fauna-text-muted fauna-text-small fauna-no-margin">
                         <time datetime="{{ trip.startDate|date('Y-m-d') }}">{{ trip.startDate|date('d M Y') }}</time>
                         –
                         <time datetime="{{ trip.endDate|date('Y-m-d') }}">{{ trip.endDate|date('d M Y') }}</time>
@@ -32,48 +31,48 @@
                 {% endif %}
             </div>
             {% if app.user and app.user == trip.user %}
-                <div style="display: flex; gap: 0.5rem; flex-shrink: 0;">
-                    <a href="{{ path('fauna_trip_edit', {id: trip.id.toString()}) }}" class="fauna-btn" style="padding: 0.5rem 1rem; background-color: #2b3b2b;">Edit Trip</a>
-                    <form action="{{ path('fauna_trip_delete', {id: trip.id.toString()}) }}" method="post" onsubmit="return confirm('Delete this trip? This cannot be undone.');" style="display: inline;">
+                <div class="fauna-toolbar fauna-toolbar-no-shrink">
+                    <a href="{{ path('fauna_trip_edit', {id: trip.id.toString()}) }}" class="fauna-btn fauna-secondary fauna-btn-small">Edit Trip</a>
+                    <form action="{{ path('fauna_trip_delete', {id: trip.id.toString()}) }}" method="post" onsubmit="return confirm('Delete this trip? This cannot be undone.');" class="fauna-form-inline">
                         <input type="hidden" name="_token" value="{{ csrf_token('delete-trip-' ~ trip.id.toString()) }}">
-                        <button type="submit" class="fauna-btn fauna-btn-danger" style="padding: 0.5rem 1rem;">Delete</button>
+                        <button type="submit" class="fauna-btn fauna-btn-danger fauna-btn-small">Delete</button>
                     </form>
                 </div>
             {% endif %}
         </header>
 
         <section aria-labelledby="sightings-heading">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h2 id="sightings-heading" style="margin: 0; font-size: 1.2rem;">Sightings</h2>
+            <div class="fauna-header-row fauna-margin-bottom-1">
+                <h2 id="sightings-heading" class="fauna-section-title">Sightings</h2>
                 {% if app.user and app.user == trip.user %}
-                    <a href="{{ path('fauna_sighting_new') }}?trip={{ trip.id.toString() }}" class="fauna-btn" style="padding: 0.5rem 1rem; font-size: 0.875rem;">Add Sighting</a>
+                    <a href="{{ path('fauna_sighting_new') }}?trip={{ trip.id.toString() }}" class="fauna-btn fauna-btn-small">Add Sighting</a>
                 {% endif %}
             </div>
 
             {% if sightings is not empty %}
-                <ul style="list-style: none; padding: 0; margin: 0;">
+                <ul class="fauna-list-reset">
                 {% for sighting in sightings %}
-                    <li style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 0; border-bottom: 1px solid var(--fauna-border);">
-                        <div>
-                            <a href="{{ path('fauna_sighting_show', {id: sighting.id.toString()}) }}" style="font-weight: 600;">
-                                {{ sighting.species.name }}
-                            </a>
-                            <span style="color: var(--fauna-text-muted); font-style: italic; margin-left: 0.5rem;">{{ sighting.species.latin }}</span>
-                            {% if sighting.location %}
-                                <span style="color: var(--fauna-text-muted); font-size: 0.875rem; display: block;">📍 {{ sighting.location }}</span>
-                            {% endif %}
-                        </div>
-                        <div style="text-align: right; flex-shrink: 0;">
-                            <span style="font-size: 1.25rem; font-weight: 700; color: var(--fauna-primary);">{{ sighting.count }}</span>
-                            <span style="color: var(--fauna-text-muted); font-size: 0.875rem; display: block;">
-                                <time datetime="{{ sighting.date|date('Y-m-d') }}">{{ sighting.date|date('d M Y') }}</time>
-                            </span>
+                    <li class="fauna-card fauna-card-compact">
+                        <div class="fauna-card-header fauna-card-header-center">
+                            <div>
+                                <a href="{{ path('fauna_sighting_show', {id: sighting.id.toString()}) }}" class="fauna-card-link">{{ sighting.species.name }}</a>
+                                <span class="fauna-text-muted fauna-inline-label">{{ sighting.species.latin }}</span>
+                                {% if sighting.location %}
+                                    <span class="fauna-text-muted fauna-text-small fauna-text-block">📍 {{ sighting.location }}</span>
+                                {% endif %}
+                            </div>
+                            <div class="fauna-card-stat-right">
+                                <span class="fauna-detail-value-secondary fauna-detail-value--primary">{{ sighting.count }}</span>
+                                <span class="fauna-text-muted fauna-text-small fauna-text-block">
+                                    <time datetime="{{ sighting.date|date('Y-m-d') }}">{{ sighting.date|date('d M Y') }}</time>
+                                </span>
+                            </div>
                         </div>
                     </li>
                 {% endfor %}
                 </ul>
             {% else %}
-                <p style="color: var(--fauna-text-muted); font-style: italic;">No sightings recorded for this trip yet.</p>
+                <p class="fauna-text-muted">No sightings recorded for this trip yet.</p>
                 {% if app.user and app.user == trip.user %}
                     <a href="{{ path('fauna_sighting_new') }}?trip={{ trip.id.toString() }}" class="fauna-btn" role="button">Log First Sighting</a>
                 {% endif %}

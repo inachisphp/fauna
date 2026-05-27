@@ -1,49 +1,48 @@
-{% extends 'base.html.twig' %}
+{% extends '@Fauna/layout.html.twig' %}
 
 {% block title %}Species - Fauna{% endblock %}
 
-{% block body %}
-{% include '@Fauna/_styles.html.twig' %}
+{% block fauna_body %}
 
 <main class="fauna-container" id="maincontent">
-    <header style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
-        <h1 style="margin: 0;">Species</h1>
+    <header class="fauna-header-row">
+        <h1 class="fauna-no-margin">Species</h1>
     </header>
 
     {% if results is defined and results is not empty %}
-        <p style="color: var(--fauna-text-muted); margin-bottom: 1.5rem;">
+        <p class="fauna-text-muted fauna-margin-bottom-1">
             Found {{ results|length }} result{{ results|length != 1 ? 's' }} for <strong>{{ query }}</strong>
         </p>
-        <ul style="list-style: none; padding: 0;">
+        <ul class="fauna-list-reset fauna-grid">
             {% for species in results %}
-                <li class="fauna-card" style="padding: 1rem 1.5rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+                <li class="fauna-card fauna-card-compact">
+                    <div class="fauna-card-header">
                         <div>
-                            <h2 style="margin: 0 0 0.25rem; font-size: 1.1rem;">
+                            <h2 class="fauna-heading-tight">
                                 <a href="{{ path('fauna_species_show', {id: species.id.toString()}) }}">{{ species.name }}</a>
                             </h2>
-                            <em style="color: var(--fauna-text-muted);">{{ species.latin }}</em>
+                            <em class="fauna-text-muted">{{ species.latin }}</em>
                         </div>
                         {% if species.iucn %}
-                            <span class="fauna-iucn-badge">{{ species.iucn }}</span>
+                            <span class="fauna-iucn-badge fauna-iucn-badge--{{ species.iucn|lower }}">{{ species.iucn }}</span>
                         {% endif %}
                     </div>
                 </li>
             {% endfor %}
         </ul>
     {% elseif query is defined and query is not empty %}
-        <div class="fauna-card" style="text-align: center; padding: 2.5rem;">
-            <p style="color: var(--fauna-text-muted);">No species matched "<strong>{{ query }}</strong>". Try a different name.</p>
+        <div class="fauna-card fauna-card-center">
+            <p class="fauna-text-muted">No species matched "<strong>{{ query }}</strong>". Try a different name.</p>
         </div>
     {% else %}
-        <div class="fauna-card" style="text-align: center; padding: 2.5rem;">
-            <p style="color: var(--fauna-text-muted);">Use the search below to find a species.</p>
+        <div class="fauna-card fauna-card-center">
+            <p class="fauna-text-muted">Use the search below to find a species.</p>
         </div>
     {% endif %}
 
-    <div class="fauna-card" style="margin-top: 2rem;">
-        <form action="{{ path('fauna_species_search') }}" method="get" aria-label="Search for a species">
-            <div class="fauna-form-group" style="margin-bottom: 1rem;">
+    <div class="fauna-card fauna-page-section">
+        <form action="{{ path('fauna_species_list') }}" method="get" aria-label="Search for a species">
+            <div class="fauna-form-group">
                 <label for="species_q">Search by common or scientific name</label>
                 <input type="text" name="q" id="species_q" value="{{ query ?? '' }}"
                        placeholder="e.g. House Sparrow or Passer domesticus" autofocus />
