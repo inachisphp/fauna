@@ -23,9 +23,12 @@
         "symfony/http-kernel": "^8.0",
         "symfony/routing": "^8.0",
         "symfony/security-bundle": "^8.0",
-        "symfony/validator": "^8.0"
+        "symfony/asset": "^8.0"
     },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
     "require-dev": {
+        "doctrine/migrations": "^4.0",
         "phpunit/phpunit": "^11.0"
     },
     "autoload": {

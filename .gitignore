@@ -9,3 +9,6 @@ nbproject/
 
 # Logs
 *.log
+
+composer.lock
+
